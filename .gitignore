@@ -1,0 +1,52 @@
+# --- Environment Files ---
+.env
+.env.*
+!.env.example
+
+# --- IDE & Editor Config ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.nova/
+.zed/
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+
+# --- Rust / Backend (recruitment-backend) ---
+**/target/
+**/recruitment-backend/target/
+**/webhook_test.log
+**/sqlx-cache.tgz
+**/.sqlx/
+
+# --- Node / Frontend (frontend) ---
+**/node_modules/
+**/frontend/node_modules/
+**/.next/
+**/frontend/.next/
+**/out/
+**/dist/
+**/tsconfig.tsbuildinfo
+**.eslintcache
+
+# --- Data & Uploads ---
+**/uploads/
+**/uploads/cv/*
+!**/uploads/cv/.gitkeep
+
+# --- Testing & Scripts ---
+**/test_1f_webhook.py
+**/test_api.py
+**/vacancy_creation.py
+**/*.log
+
+# --- Docker ---
+.dockerignore
+(if_exists).docker-compose.override.yml
+
+# --- Miscellaneous ---
+**/Cargo.toml.bak
+**/migrations_backup/

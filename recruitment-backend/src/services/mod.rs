@@ -1,0 +1,14 @@
+pub mod ai_service;
+pub mod candidate_service;
+pub mod attempt_service;
+pub mod audit_service;
+pub mod embed_service;
+pub mod eval_service;
+pub mod external_vacancy_service;
+pub mod grading_service;
+pub mod notification_service;
+pub mod queue_service;
+pub mod test_service;
+pub mod vacancy_service;
+pub mod koinotinav_service;
+pub mod onef_service;

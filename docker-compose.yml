@@ -1,0 +1,81 @@
+services:
+  # ============================================
+  # Backend Service (Rust)
+  # ============================================
+  backend:
+    build:
+      context: ./recruitment-backend
+      dockerfile: Dockerfile
+    container_name: recruitment-backend
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    environment:
+      - SERVER_ADDRESS=0.0.0.0:8080
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_WEBHOOK_URL=${TELEGRAM_BOT_WEBHOOK_URL}
+      - WEBAPP_URL=${WEBAPP_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MAX_AI_QUESTIONS=${MAX_AI_QUESTIONS:-25}
+      - PUBLIC_RPS=${PUBLIC_RPS:-20}
+      - INTEGRATION_RPS=${INTEGRATION_RPS:-10}
+      - ONEF_WEBHOOK_URL=${ONEF_WEBHOOK_URL:-}
+      - RUST_LOG=info,recruitment_backend=debug
+    volumes:
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - recruitment-network
+
+  # ============================================
+  # Frontend Service (Next.js)
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+    container_name: recruitment-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=http://backend:8080
+    depends_on:
+      - backend
+    networks:
+      - recruitment-network
+
+  # ============================================
+  # PostgreSQL Database (Optional - if not external)
+  # ============================================
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: recruitment-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #     POSTGRES_DB: recruitment_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - recruitment-network
+
+networks:
+  recruitment-network:
+    driver: bridge
+
+# volumes:
+#   postgres_data:
