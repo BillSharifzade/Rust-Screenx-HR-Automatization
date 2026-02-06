@@ -25,7 +25,6 @@ import {
     BarChart3,
     Link2,
     Download,
-    Star,
     Presentation
 }
     from 'lucide-react';

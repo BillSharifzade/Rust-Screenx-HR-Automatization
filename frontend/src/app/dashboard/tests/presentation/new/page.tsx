@@ -10,11 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { ArrowLeft, Save, Plus, Trash2, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useTranslation } from '@/lib/i18n-context';
-import { Switch } from '@/components/ui/switch';
 import {
     Tooltip,
     TooltipContent,

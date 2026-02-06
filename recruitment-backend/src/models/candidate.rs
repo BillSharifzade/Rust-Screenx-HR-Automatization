@@ -18,6 +18,7 @@ pub struct Candidate {
     pub ai_rating: Option<i32>,
     pub ai_comment: Option<String>,
     pub status: String,
+    pub unread_messages: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }

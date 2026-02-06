@@ -131,6 +131,8 @@ export interface Candidate {
   profile_data?: any;
   ai_rating?: number;
   ai_comment?: string;
+  status: string;
+  unread_messages?: number;
   created_at?: string;
   updated_at?: string;
 }

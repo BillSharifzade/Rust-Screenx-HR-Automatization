@@ -7,8 +7,8 @@ import { ru as localeRu, enUS as localeEn } from "date-fns/locale"
 
 import { useQuery } from "@tanstack/react-query"
 import {
-    Plus, Search, User, Mail, Phone, Calendar, Briefcase, FileText,
-    Download, Sparkles, Binary, Loader2, ChevronRight, LayoutGrid,
+    Search, User, Mail, Phone, Calendar, Briefcase, FileText,
+    Download, Sparkles, Binary, Loader2, LayoutGrid,
     List, History, CheckCircle2, Clock, XCircle, Send, MessageSquare,
     AlertCircle, Cake, ChevronDown
 } from "lucide-react"
@@ -18,13 +18,12 @@ import { useSearchParams } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -127,6 +126,15 @@ function CandidatesPageContent() {
         queryFn: () => apiFetch<any[]>(`/api/candidate/${viewHistoryCandidate?.id}/history`),
         enabled: !!viewHistoryCandidate,
     });
+
+    const MessageBadge = ({ count }: { count?: number }) => {
+        if (!count || count <= 0) return null;
+        return (
+            <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-background animate-in zoom-in duration-300 z-10">
+                {count > 9 ? '9+' : count}
+            </span>
+        );
+    };
 
     const getHistoryIcon = (eventType: string, status: string | null) => {
         const s = status || "";
@@ -518,12 +526,15 @@ function CandidatesPageContent() {
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
 
-                                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-primary/10" onClick={() => {
-                                                    if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
-                                                    setMessageCandidate(candidate);
-                                                }}>
-                                                    <MessageSquare className="h-4 w-4 text-primary" />
-                                                </Button>
+                                                <div className="relative">
+                                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-primary/10" onClick={() => {
+                                                        if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
+                                                        setMessageCandidate(candidate);
+                                                    }}>
+                                                        <MessageSquare className="h-4 w-4 text-primary" />
+                                                    </Button>
+                                                    <MessageBadge count={candidate.unread_messages} />
+                                                </div>
 
                                                 <AiAssessmentDialog
                                                     candidate={candidate}
@@ -727,12 +738,13 @@ function CandidatesPageContent() {
 
                                                 {/* Text Buttons */}
                                                 <div className="flex items-center gap-2 ml-1">
-                                                    <Button variant="outline" size="sm" className="h-9 gap-2 text-[11px] font-semibold border-primary/10 hover:bg-primary/5 hover:border-primary/20 hidden xl:flex" onClick={() => {
+                                                    <Button variant="outline" size="sm" className="h-9 gap-2 text-[11px] font-semibold border-primary/10 hover:bg-primary/5 hover:border-primary/20 hidden xl:flex relative" onClick={() => {
                                                         if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
                                                         setMessageCandidate(candidate);
                                                     }}>
                                                         <MessageSquare className="h-3.5 w-3.5 text-primary" />
                                                         <span>{t('common.message') || "Message"}</span>
+                                                        <MessageBadge count={candidate.unread_messages} />
                                                     </Button>
 
                                                     <Button variant="secondary" size="sm" className="h-9 gap-2 text-[11px] font-semibold flex-1 lg:flex-none lg:min-w-[130px] border border-transparent hover:border-primary/20" onClick={() => {

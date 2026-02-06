@@ -16,7 +16,12 @@ impl CandidateService {
     pub async fn get_by_telegram_id(&self, telegram_id: i64) -> Result<Option<Candidate>> {
         let candidate = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates WHERE telegram_id = $1"#,
+            r#"
+            SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.candidate_id = candidates.id AND m.read_at IS NULL AND m.direction = 'inbound') as unread_messages
+            FROM candidates 
+            WHERE telegram_id = $1
+            "#,
             telegram_id
         )
         .fetch_optional(&self.pool)
@@ -27,7 +32,12 @@ impl CandidateService {
     pub async fn get_candidate(&self, id: uuid::Uuid) -> Result<Option<Candidate>> {
         let candidate = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates WHERE id = $1"#,
+            r#"
+            SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.candidate_id = candidates.id AND m.read_at IS NULL AND m.direction = 'inbound') as unread_messages
+            FROM candidates 
+            WHERE id = $1
+            "#,
             id
         )
         .fetch_optional(&self.pool)
@@ -78,7 +88,7 @@ impl CandidateService {
             r#"
             INSERT INTO candidates (telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new')
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at, 0::bigint as "unread_messages!"
             "#,
             telegram_id,
             name,
@@ -105,7 +115,7 @@ impl CandidateService {
             UPDATE candidates
             SET cv_url = $1, updated_at = NOW()
             WHERE id = $2
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at, 0::bigint as "unread_messages!"
             "#,
             cv_url,
             id
@@ -118,7 +128,12 @@ impl CandidateService {
     pub async fn list_candidates(&self) -> Result<Vec<Candidate>> {
         let candidates = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates ORDER BY created_at DESC"#
+            r#"
+            SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.candidate_id = candidates.id AND m.read_at IS NULL AND m.direction = 'inbound') as unread_messages
+            FROM candidates 
+            ORDER BY created_at DESC
+            "#
         )
         .fetch_all(&self.pool)
         .await?;
@@ -158,7 +173,8 @@ impl CandidateService {
         let candidates = sqlx::query_as!(
             Candidate,
             r#"
-            SELECT c.id, c.telegram_id, c.name, c.email, c.phone, c.cv_url, c.dob, c.vacancy_id, c.profile_data, c.ai_rating, c.ai_comment, c.status, c.created_at, c.updated_at
+            SELECT c.id, c.telegram_id, c.name, c.email, c.phone, c.cv_url, c.dob, c.vacancy_id, c.profile_data, c.ai_rating, c.ai_comment, c.status, c.created_at, c.updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.candidate_id = c.id AND m.read_at IS NULL AND m.direction = 'inbound') as unread_messages
             FROM candidates c
             JOIN candidate_applications ca ON c.id = ca.candidate_id
             WHERE ca.vacancy_id = $1
@@ -178,7 +194,7 @@ impl CandidateService {
             UPDATE candidates
             SET ai_rating = $1, ai_comment = $2, updated_at = NOW()
             WHERE id = $3
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at, 0::bigint as "unread_messages!"
             "#,
             rating,
             comment,
@@ -196,7 +212,7 @@ impl CandidateService {
             UPDATE candidates
             SET status = $1, updated_at = NOW()
             WHERE id = $2
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at, 0::bigint as "unread_messages!"
             "#,
             status,
             id
