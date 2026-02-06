@@ -74,20 +74,39 @@ impl KoinotinavService {
 
     pub async fn fetch_vacancy(&self, id: i64) -> Result<Option<ExternalVacancy>> {
         let url = format!("{}/api/vacancies/{}", self.base_url, id);
+        tracing::info!("Fetching single vacancy details from: {}", url);
+        
         let response = self
             .client
             .get(&url)
             .send()
             .await?;
         
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+        if response.status() == reqwest::StatusCode::OK {
+            // Check content type to avoid parsing HTML as JSON
+            let content_type = response.headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+
+            if content_type.contains("application/json") {
+                match response.json::<ExternalVacancy>().await {
+                    Ok(v) => return Ok(Some(v)),
+                    Err(e) => tracing::warn!("Failed to parse single vacancy JSON: {}. Falling back to list.", e),
+                }
+            } else {
+                tracing::warn!("Vacancy endpoint returned non-JSON content ({}). Falling back to list scan.", content_type);
+            }
+        } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+            tracing::warn!("Vacancy {} not found via direct API. Falling back to list scan.", id);
+        } else {
+            tracing::warn!("Vacancy API returned status {}. Falling back to list scan.", response.status());
         }
 
-        let vacancy = response
-            .json::<ExternalVacancy>()
-            .await?;
-        Ok(Some(vacancy))
+        // Fallback: search in the full list
+        tracing::info!("Scanning full vacancy list for ID {}", id);
+        let all_vacancies = self.fetch_vacancies().await?;
+        Ok(all_vacancies.into_iter().find(|v| v.id == id))
     }
 
     pub async fn fetch_companies(&self) -> Result<Vec<ExternalCompany>> {

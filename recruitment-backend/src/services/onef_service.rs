@@ -1,5 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tracing::{info, warn, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,13 @@ pub struct OneFApplicationPayload {
     pub vacancy_name: String,
     pub candidate: OneFCandidateInfo,
     pub applied_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OneFGradePayload {
+    pub candidate_id: uuid::Uuid,
+    pub grade: i32,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +156,96 @@ impl OneFService {
                 Err(e)
             }
         }
+    }
+
+    pub async fn notify_grade(
+        &self,
+        candidate_id: uuid::Uuid,
+        grade: i32,
+    ) -> Result<(), String> {
+        let webhook_url = match &self.webhook_url {
+            Some(url) => url,
+            None => {
+                return Ok(());
+            }
+        };
+
+        let payload = json!({
+            "candidate_id": candidate_id,
+            "grade": grade,
+            "shared_at": chrono::Utc::now().to_rfc3339(),
+        });
+
+        let wrapper = json!({
+            "requestBody": payload
+        });
+
+        info!(
+            "Sharing grade to 1F: candidate {} grade {}",
+            candidate_id, grade
+        );
+
+        let response = self
+            .client
+            .post(webhook_url)
+            .json(&wrapper)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        let status = response.status();
+        
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!("1F grade sharing failed with status {}: {}", status, body);
+            return Err(format!("HTTP error {}: {}", status, body));
+        }
+
+        info!("Successfully shared grade to 1F for candidate {}", candidate_id);
+        info!("Successfully shared grade to 1F for candidate {}", candidate_id);
+        Ok(())
+    }
+
+    pub async fn notify_new_message(
+        &self,
+        candidate_id: uuid::Uuid,
+        telegram_id: i64,
+        text: &str,
+    ) -> Result<(), String> {
+        let webhook_url = match &self.webhook_url {
+            Some(url) => url,
+            None => return Ok(()),
+        };
+
+        let payload = json!({
+            "event_type": "new_message",
+            "candidate_id": candidate_id,
+            "telegram_id": telegram_id,
+            "text": text,
+            "received_at": chrono::Utc::now().to_rfc3339(),
+        });
+
+        // Wrap in requestBody to match OneF expectation if consistent style is needed,
+        // or send flat. Based on existing code, OneF expects requestBody wrapper.
+        let wrapper = json!({
+            "requestBody": payload
+        });
+
+        info!("Forwarding new message from candidate {} into 1F webhook", candidate_id);
+
+        let response = self.client.post(webhook_url)
+            .json(&wrapper)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!("1F message forwarding failed: {}", body);
+            // We logged it, but maybe we don't want to break the flow?
+            // Returning error allows caller to decide.
+        }
+        Ok(())
     }
 
     async fn send_webhook(

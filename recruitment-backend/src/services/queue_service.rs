@@ -121,8 +121,6 @@ impl AiQueueService {
         let gen_result = app_state
             .ai_service
             .generate_test(
-                &app_state.embed_service,
-                &app_state.eval_service,
                 profession,
                 &skills,
                 num_q,

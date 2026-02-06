@@ -209,8 +209,16 @@ async fn main() -> anyhow::Result<()> {
             get(routes::integration::list_candidates),
         )
         .route(
+            "/api/integration/candidates/:id/status",
+            post(routes::candidate_routes::update_candidate_status),
+        )
+        .route(
             "/api/integration/analyze-suitability/:id",
             post(routes::candidate_routes::analyze_candidate_suitability),
+        )
+        .route(
+            "/api/integration/candidates/:id/onef-grade",
+            post(routes::candidate_routes::share_candidate_grade_to_onef),
         )
         .route(
             "/api/integration/tests/all",
@@ -229,9 +237,23 @@ async fn main() -> anyhow::Result<()> {
             post(routes::integration::send_message),
         )
         .route(
+            "/api/integration/messages/:candidate_id",
+            get(routes::integration::get_chat_messages),
+        )
+        .route(
+            "/api/integration/messages/unread",
+            get(routes::integration::get_unread_count),
+        )
+
+        .route(
             "/api/integration/notifications/poll",
             get(routes::integration::poll_notifications),
         )
+        .route(
+            "/api/integration/dashboard/stats",
+            get(routes::integration::get_dashboard_stats),
+        )
+
         .layer(axum::middleware::from_fn_with_state(
             recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),
             recruitment_backend::middleware::rate_limit::rps_middleware,
@@ -315,10 +337,64 @@ async fn main() -> anyhow::Result<()> {
             recruitment_backend::middleware::rate_limit::rps_middleware,
         ));
 
+    let onef_api = Router::new()
+        .route(
+            "/api/onef/messages",
+            post(routes::onef::send_message),
+        )
+        .route(
+            "/api/onef/messages/:candidate_id",
+            get(routes::onef::get_chat_history),
+        )
+        .route(
+            "/api/onef/messages/unread",
+            get(routes::onef::get_unread_count),
+        )
+        .route(
+            "/api/onef/dashboard",
+            get(routes::onef::get_dashboard_stats),
+        )
+        .route(
+            "/api/onef/vacancies",
+            get(routes::onef::list_vacancies),
+        )
+        .route(
+            "/api/onef/vacancies/:id",
+            get(routes::onef::get_vacancy),
+        )
+        .route(
+            "/api/onef/candidates/:id",
+            get(routes::onef::get_candidate),
+        )
+        .route(
+            "/api/onef/candidates/:id/attempts",
+            get(routes::onef::get_candidate_attempts),
+        )
+        .route(
+            "/api/onef/attempts/:id",
+            get(routes::onef::get_test_attempt),
+        )
+        .route(
+            "/api/onef/candidates/:id/status",
+            post(routes::onef::update_candidate_status),
+        )
+        .route(
+            "/api/onef/candidates/:id/analyze",
+            post(routes::candidate_routes::analyze_candidate_suitability),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),
+            recruitment_backend::middleware::rate_limit::rps_middleware,
+        ));
+
+    let upload_path = std::env::var("UPLOADS_DIR").unwrap_or_else(|_| "/app/uploads".to_string());
+    info!("Serving uploads from: {}", upload_path);
+
     let app = base_routes
         .merge(integration_api)
         .merge(public_api)
-        .nest_service("/uploads", tower_http::services::ServeDir::new("uploads"))
+        .merge(onef_api)
+        .nest_service("/uploads", tower_http::services::ServeDir::new(upload_path))
         .with_state(app_state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

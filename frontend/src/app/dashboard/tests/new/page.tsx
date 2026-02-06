@@ -12,10 +12,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, Trash2, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Sparkles, ArrowLeft } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { useTranslation } from '@/lib/i18n-context';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 
 export default function NewTestPage() {
     const { t } = useTranslation();
@@ -185,12 +186,19 @@ export default function NewTestPage() {
 
     return (
         <div className="max-w-4xl space-y-6">
-            <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                    <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.tests_new.title')}</h3>
-                    <p className="text-muted-foreground">
-                        {t('dashboard.tests_new.subtitle')}
-                    </p>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <Link href="/dashboard/tests">
+                        <Button variant="ghost" size="icon" type="button">
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                    </Link>
+                    <div className="space-y-1">
+                        <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.tests_new.title')}</h3>
+                        <p className="text-muted-foreground">
+                            {t('dashboard.tests_new.subtitle')}
+                        </p>
+                    </div>
                 </div>
                 <Button
                     type="button"

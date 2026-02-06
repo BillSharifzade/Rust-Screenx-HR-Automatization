@@ -83,6 +83,7 @@ export default function TestAttemptsPage() {
         const variants: Record<string, { variant: any; icon: any; label: string }> = {
             completed: { variant: 'default', icon: CheckCircle, label: t('dashboard.attempts.statuses.completed') },
             in_progress: { variant: 'secondary', icon: Loader2, label: t('dashboard.attempts.statuses.in_progress') },
+            active: { variant: 'secondary', icon: Clock, label: t('dashboard.attempts.statuses.active') },
             expired: { variant: 'outline', icon: XCircle, label: t('dashboard.attempts.statuses.expired') },
             timeout: { variant: 'outline', icon: Clock, label: t('dashboard.attempts.statuses.timeout') },
             escaped: { variant: 'outline', icon: XCircle, label: t('dashboard.attempts.statuses.escaped') },
@@ -107,7 +108,7 @@ export default function TestAttemptsPage() {
             }
         }
 
-        const config = variants[status] || { ...variants.in_progress, label: status };
+        const config = variants[status] || { variant: 'outline', icon: AlertCircle, label: t(`dashboard.attempts.statuses.${status}`) || status };
         const Icon = config.icon;
 
         if (status === 'needs_review') {

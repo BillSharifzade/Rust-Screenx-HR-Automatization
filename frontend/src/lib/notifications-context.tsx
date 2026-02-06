@@ -5,11 +5,11 @@ import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { usePathname } from 'next/navigation';
 import { useTranslation } from './i18n-context';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface NotificationCounts {
     candidates: number;
     attempts: number;
-    // Add more as needed
 }
 
 interface NotificationsContextType {
@@ -39,6 +39,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         }
     }, [pathname]);
 
+    const queryClient = useQueryClient();
+
     useEffect(() => {
         const poll = async () => {
             try {
@@ -56,6 +58,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
                 if (data.candidates && data.candidates.length > 0) {
                     newCandidates = data.candidates.length;
+
+                    // Always refresh data if we're on the page
+                    if (pathname === '/dashboard/candidates') {
+                        queryClient.invalidateQueries({ queryKey: ["candidates"] });
+                    }
+
                     // Show toast only if not on the page
                     if (pathname !== '/dashboard/candidates') {
                         toast.info(t('notifications.new_candidates').replace('{count}', newCandidates.toString()), {
@@ -66,6 +74,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
                 if (data.attempts && data.attempts.length > 0) {
                     newAttempts = data.attempts.length;
+
+                    // Refresh data if on relevant pages
+                    if (pathname === '/dashboard/attempts' || pathname === '/dashboard/invites') {
+                        queryClient.invalidateQueries({ queryKey: ["test-attempts"] });
+                        queryClient.invalidateQueries({ queryKey: ["invites"] });
+                    }
+
                     // Filter vital updates?
                     const completed = data.attempts.filter((a: any) => a.status === 'completed' || a.status === 'needs_review');
 
@@ -76,11 +91,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
                     }
                 }
 
-                if (newCandidates > 0 || newAttempts > 0) {
-                    setCounts(prev => ({
-                        candidates: pathname === '/dashboard/candidates' ? 0 : prev.candidates + newCandidates,
-                        attempts: (pathname === '/dashboard/attempts' || pathname === '/dashboard/invites') ? 0 : prev.attempts + newAttempts,
-                    }));
+                if (data.counts) {
+                    setCounts({
+                        candidates: pathname === '/dashboard/candidates' ? 0 : data.counts.candidates,
+                        attempts: (pathname === '/dashboard/attempts' || pathname === '/dashboard/invites') ? 0 : data.counts.attempts,
+                    });
                 }
 
             } catch (e) {
@@ -90,7 +105,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
         const intervalId = setInterval(poll, 15000); // 15 seconds
         return () => clearInterval(intervalId);
-    }, [pathname]);
+    }, [pathname, queryClient]);
 
     const resetCount = (type: keyof NotificationCounts) => {
         setCounts(prev => ({ ...prev, [type]: 0 }));

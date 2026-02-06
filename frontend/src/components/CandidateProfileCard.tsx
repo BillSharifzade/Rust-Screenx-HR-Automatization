@@ -74,6 +74,7 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
     });
 
     const getHistoryIcon = (eventType: string, status: string | null) => {
+        const s = status || "";
         switch (eventType) {
             case 'registration':
                 return <User className="h-4 w-4 text-green-500" />;
@@ -82,9 +83,9 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
             case 'profile_update':
                 return <FileText className="h-4 w-4 text-purple-500" />;
             case 'test_attempt':
-                if (status === 'Passed') return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-                if (status === 'Failed') return <XCircle className="h-4 w-4 text-red-500" />;
-                if (status === 'Pending') return <Clock className="h-4 w-4 text-yellow-500" />;
+                if (s === 'Passed' || s === 'candidate_profile.status_passed') return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+                if (s === 'Failed' || s === 'candidate_profile.status_failed') return <XCircle className="h-4 w-4 text-red-500" />;
+                if (s === 'Pending' || s.includes('pending')) return <Clock className="h-4 w-4 text-yellow-500" />;
                 return <AlertCircle className="h-4 w-4 text-orange-500" />;
             default:
                 return <History className="h-4 w-4 text-muted-foreground" />;
@@ -466,6 +467,12 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
                                                             <Badge variant="outline" className="text-xs flex-shrink-0">
                                                                 {(() => {
                                                                     const s = item.status;
+                                                                    if (!s) return null;
+
+                                                                    // If it looks like a translation key, translate it
+                                                                    if (s.includes('.')) return t(s);
+
+                                                                    // Fallback mappings for legacy/raw strings
                                                                     if (s === 'Passed') return t('dashboard.attempts.labels.passed');
                                                                     if (s === 'Failed') return t('dashboard.attempts.labels.failed');
                                                                     if (s === 'Pending') return t('dashboard.attempts.statuses.pending');
@@ -475,6 +482,7 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
                                                                     if (s === 'Needs Review') return t('dashboard.attempts.statuses.needs_review');
                                                                     if (s === 'submitted') return t('dashboard.attempts.card.submitted');
                                                                     if (s === 'completed') return t('dashboard.attempts.statuses.completed');
+
                                                                     return s;
                                                                 })()}
                                                             </Badge>

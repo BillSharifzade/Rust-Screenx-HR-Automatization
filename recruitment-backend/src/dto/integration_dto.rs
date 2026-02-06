@@ -12,7 +12,7 @@ pub struct CreateQuestion {
     pub details: QuestionDetails,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct GenerateVacancyDescriptionPayload {
     #[validate(length(min = 1))]
     pub title: String,
@@ -61,7 +61,6 @@ pub struct CreateTestPayload {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateTestPayload {
-    // Using serde deserializer to trim and convert empty strings to None
     #[serde(default, deserialize_with = "trim_optional_string")]
     pub title: Option<String>,
 
@@ -100,7 +99,6 @@ pub struct UpdateTestPayload {
     pub presentation_extra_info: Option<String>,
 }
 
-// Custom deserializer to trim strings and convert empty strings to None
 fn trim_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -196,6 +194,17 @@ pub struct CandidateStatusSync {
     pub external_id: Option<String>,
     pub name: String,
     pub email: String,
-    pub status: String, // from last attempt or overall status
+    pub status: String,
     pub last_updated: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DashboardStats {
+    pub total_candidates: i64,
+    pub unread_messages: i64,
+    pub active_tests: i64, 
+    pub active_vacancies: i64,
+    pub candidates_by_status: std::collections::HashMap<String, i64>,
+    pub candidates_history: Vec<(String, i64)>,
+    pub attempts_status: std::collections::HashMap<String, i64>,
 }

@@ -17,6 +17,7 @@ pub struct Candidate {
     pub profile_data: Option<JsonValue>,
     pub ai_rating: Option<i32>,
     pub ai_comment: Option<String>,
+    pub status: String,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }

@@ -102,7 +102,7 @@ export default function NewPresentationPage() {
                 </Link>
                 <div>
                     <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.attempts.presentation.create_title')}</h3>
-                    <p className="text-muted-foreground">{t('dashboard.tests_new.subtitle')}</p>
+                    <p className="text-muted-foreground">{t('dashboard.attempts.presentation.create_subtitle')}</p>
                 </div>
             </div>
 

@@ -49,19 +49,25 @@ async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
         return Err(crate::error::Error::BadRequest("Invalid PNG file content".into()));
     }
 
-    let upload_dir = "./uploads/cv";
-    fs::create_dir_all(upload_dir).await.map_err(|e| crate::error::Error::Internal(e.to_string()))?;
+    let upload_root = std::env::var("UPLOADS_DIR").unwrap_or_else(|_| "/app/uploads".to_string());
+    let cv_dir = format!("{}/cv", upload_root);
+
+    if let Err(e) = fs::create_dir_all(&cv_dir).await {
+        tracing::error!("Failed to create upload directory {}: {}", cv_dir, e);
+        return Err(crate::error::Error::Internal(format!("Storage error: {}", e)));
+    }
 
     let file_id = uuid::Uuid::new_v4();
     let safe_filename = format!("{}.{}", file_id, ext);
-    let file_path = format!("{}/{}", upload_dir, safe_filename);
+    let absolute_path = format!("{}/{}", cv_dir, safe_filename);
 
-    fs::write(&file_path, data).await.map_err(|e| {
-        tracing::error!("Failed to write CV file: {}", e);
+    fs::write(&absolute_path, data).await.map_err(|e| {
+        tracing::error!("Failed to write CV file at {}: {}", absolute_path, e);
         crate::error::Error::Internal(format!("Failed to save file: {}", e))
     })?;
 
-    Ok(file_path)
+    // Return the PUBLIC relative path for the database
+    Ok(format!("uploads/cv/{}", safe_filename))
 }
 
 async fn extract_text_from_file(file_path: &str) -> String {
@@ -220,7 +226,7 @@ pub async fn register_candidate(
             }
 
             if !cv_text.is_empty() || !v_desc.is_empty() {
-                match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, &v_name, &v_desc).await {
+                match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, c_cv.as_deref(), &v_name, &v_desc).await {
                     Ok(suitability) => {
                         let _ = candidate_service.update_ai_suitability(candidate_id, suitability.rating, suitability.comment).await;
                         tracing::info!("AI Suitability Analysis completed for candidate {}", candidate_id);
@@ -351,7 +357,7 @@ pub async fn apply_for_vacancy(
         }
 
         if !cv_text.is_empty() && !v_desc.is_empty() {
-            match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, &v_name, &v_desc).await {
+            match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, c_cv.as_deref(), &v_name, &v_desc).await {
                 Ok(suitability) => {
                     let _ = candidate_service.update_ai_suitability(c_id, suitability.rating, suitability.comment).await;
                     tracing::info!("AI Suitability Analysis completed for candidate {} (re-application)", c_id);
@@ -423,23 +429,29 @@ pub async fn analyze_candidate_suitability(
 
     tracing::info!("Suitability analysis for {}. CV text len: {}. Scanned suspected: {}", id, cv_text.len(), is_scanned);
 
-    let mut v_name = format!("Vacancy #{}", vid);
-    let mut v_desc = String::new();
-    
-    if let Ok(Some(v)) = state.koinotinav_service.fetch_vacancy(vid).await {
-        v_name = v.title;
-        v_desc = v.content;
+    let vacancy = state.koinotinav_service.fetch_vacancy(vid).await?
+        .ok_or_else(|| {
+            tracing::error!("Could not find details for vacancy ID: {}", vid);
+            crate::error::Error::NotFound(format!("Vacancy #{} not found on the job portal", vid))
+        })?;
+
+    let v_name = vacancy.title;
+    let v_desc = vacancy.content;
+
+    if v_desc.trim().is_empty() {
+        return Err(crate::error::Error::BadRequest("Vacancy description is empty, cannot perform analysis".into()));
     }
 
     let v_name_clean = v_name.replace("<h1>", "").replace("</h1>", "").replace("<strong>", "").replace("</strong>", "").replace("<span>", "").replace("</span>", "");
     let v_desc_clean = v_desc.replace("<p>", "\n").replace("</p>", "").replace("<br>", "\n").replace("<li>", "- ").replace("</li>", "");
     
-    tracing::info!("Vacancy: '{}'. Desc len: {}", v_name_clean, v_desc_clean.len());
+    tracing::info!("Analyzing suitability for '{}' against vacancy: '{}'", candidate.name, v_name_clean);
 
     let suitability = state.ai_service.analyze_suitability(
         &candidate.name,
         &candidate.email,
         &cv_info,
+        candidate.cv_url.as_deref(),
         &v_name_clean,
         &v_desc_clean
     ).await?;
@@ -471,10 +483,10 @@ pub async fn get_candidate_history(
     
     history.push(HistoryItem {
         event_type: "registration".to_string(),
-        title: "Registered".to_string(),
-        description: Some(format!("Candidate registered with email {}", candidate.email)),
+        title: "candidate_profile.event_registered".to_string(),
+        description: Some(candidate.email.clone()),
         timestamp: candidate.created_at.unwrap_or_else(chrono::Utc::now),
-        status: Some("completed".to_string()),
+        status: Some("candidate_profile.status_completed".to_string()),
         metadata: None,
     });
 
@@ -482,10 +494,10 @@ pub async fn get_candidate_history(
         if updated.signed_duration_since(created).num_minutes() > 1 {
             history.push(HistoryItem {
                 event_type: "profile_update".to_string(),
-                title: "Profile Updated".to_string(),
-                description: Some("Candidate profile or CV was updated".to_string()),
+                title: "candidate_profile.event_update".to_string(),
+                description: None,
                 timestamp: updated,
-                status: Some("completed".to_string()),
+                status: Some("candidate_profile.status_completed".to_string()),
                 metadata: None,
             });
         }
@@ -496,10 +508,10 @@ pub async fn get_candidate_history(
     for app in applications {
         history.push(HistoryItem {
             event_type: "application".to_string(),
-            title: "Applied for vacancy".to_string(),
-            description: Some(format!("Vacancy ID: {}", app.vacancy_id)),
+            title: "candidate_profile.event_applied".to_string(),
+            description: Some(app.vacancy_id.to_string()),
             timestamp: app.created_at.unwrap_or_else(chrono::Utc::now),
-            status: Some("submitted".to_string()),
+            status: Some("candidate_profile.status_submitted".to_string()),
             metadata: None,
         });
     }
@@ -514,34 +526,35 @@ pub async fn get_candidate_history(
     ).await?;
     
     for attempt in attempts.0 {
-        let status_display = match attempt.status.as_str() {
-            "pending" => "Pending",
-            "in_progress" => "In Progress",
-            "completed" => if attempt.passed.unwrap_or(false) { "Passed" } else { "Failed" },
-            "timeout" => "Timed Out",
-            "escaped" => "Left Page",
-            "needs_review" => "Needs Review",
-            _ => &attempt.status,
+        let status_key = match attempt.status.as_str() {
+            "pending" => "dashboard.invites.statuses.pending",
+            "in_progress" => "dashboard.invites.statuses.in_progress",
+            "completed" => if attempt.passed.unwrap_or(false) { "candidate_profile.status_passed" } else { "candidate_profile.status_failed" },
+            "timeout" => "dashboard.invites.statuses.timeout",
+            "escaped" => "dashboard.invites.statuses.escaped",
+            "needs_review" => "dashboard.invites.statuses.needs_review",
+            _ => "dashboard.invites.statuses.pending",
         };
         
         let desc = if let Some(score) = attempt.percentage {
-            Some(format!("Score: {:.1}%", score))
+            Some(format!("{:.1}", score))
         } else {
             None
         };
         
         history.push(HistoryItem {
             event_type: "test_attempt".to_string(),
-            title: format!("Test: {}", attempt.status),
+            title: "candidate_profile.event_test".to_string(),
             description: desc,
             timestamp: attempt.created_at.unwrap_or_else(chrono::Utc::now),
-            status: Some(status_display.to_string()),
+            status: Some(status_key.to_string()),
             metadata: Some(serde_json::json!({
                 "attempt_id": attempt.id,
                 "test_id": attempt.test_id,
                 "passed": attempt.passed,
                 "score": attempt.score,
                 "percentage": attempt.percentage,
+                "raw_status": attempt.status,
             })),
         });
     }
@@ -549,4 +562,43 @@ pub async fn get_candidate_history(
     history.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     
     Ok(Json(history))
+}
+
+#[axum::debug_handler]
+pub async fn update_candidate_status(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<impl axum::response::IntoResponse> {
+    let status = payload["status"].as_str().ok_or_else(|| {
+        crate::error::Error::BadRequest("Status is required".into())
+    })?.to_string();
+
+    let updated = state.candidate_service.update_status(id, status).await?;
+    Ok(Json(updated))
+}
+
+#[axum::debug_handler]
+pub async fn share_candidate_grade_to_onef(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<impl axum::response::IntoResponse> {
+    let candidate = state.candidate_service.get_candidate(id).await?
+        .ok_or_else(|| {
+            crate::error::Error::NotFound("Candidate not found".into())
+        })?;
+    
+    let grade = candidate.ai_rating.ok_or_else(|| {
+        crate::error::Error::BadRequest("Candidate has no AI grade yet. Please run analyze-suitability first.".into())
+    })?;
+
+    state.onef_service.notify_grade(id, grade).await.map_err(|e| {
+        crate::error::Error::Internal(format!("Failed to share grade with 1F: {}", e))
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "message": "Grade shared with 1F",
+        "grade": grade
+    })))
 }

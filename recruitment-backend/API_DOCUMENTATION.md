@@ -613,6 +613,20 @@ When a candidate applies (either during registration with `vacancy_id` or via `P
   "applied_at": "2026-01-08T12:00:00+00:00"
 }
 ```
+
+### Grade Sharing Webhook
+
+When a recruiter shares an AI-generated grade to 1F, the following payload is sent:
+
+```json
+{
+  "requestBody": {
+    "candidate_id": "5dfedd06-9844-4468-807d-97e79ce2c9bc",
+    "grade": 85,
+    "shared_at": "2026-01-08T14:45:00Z"
+  }
+}
+```
 ### Webhook response example
 ```bash 
 🚀 1F Test Webhook Server running on http://localhost:9000/webhook
@@ -719,9 +733,55 @@ interface OneFApplicationPayload {
 
 ---
 
-## Error Handling
+---
 
-All errors follow a consistent format:
+## AI & Integration Endpoints
+
+### 1. Trigger AI Suitability Analysis
+
+Triggers the AI to analyze the candidate's CV against their associated vacancy. Updates the `ai_rating` and `ai_comment` fields.
+
+**Endpoint:** `POST /api/integration/analyze-suitability/:id`
+
+**Example Request:**
+```bash
+curl -X POST "https://api.example.com/api/integration/analyze-suitability/5dfedd06-9844-4468-807d-97e79ce2c9bc"
+```
+
+**Success Response:**
+```json
+{
+  "id": "5dfedd06-9844-4468-807d-97e79ce2c9bc",
+  "ai_rating": 85,
+  "ai_comment": "Кандидат обладает всеми необходимыми навыками..."
+}
+```
+
+---
+
+### 2. Share Candidate Grade to 1F
+
+Manually pushes the AI-generated grade for a candidate to the external 1F system.
+
+**Endpoint:** `POST /api/integration/candidates/:id/onef-grade`
+
+**Example Request:**
+```bash
+curl -X POST "https://api.example.com/api/integration/candidates/5dfedd06-9844-4468-807d-97e79ce2c9bc/onef-grade"
+```
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "message": "Grade shared with 1F",
+  "grade": 85
+}
+```
+
+---
+
+## Error Handling
 
 ```json
 {
@@ -795,6 +855,8 @@ When integrating with this API, ensure:
 | Apply to vacancy | POST | `/api/candidate/apply` |
 | Get candidate's applications | GET | `/api/candidate/:id/applications` |
 | Get vacancy's applicants | GET | `/api/vacancy/:id/candidates` |
+| Trigger AI analysis | POST | `/api/integration/analyze-suitability/:id` |
+| Share grade to 1F | POST | `/api/integration/candidates/:id/onef-grade` |
 
 ---
 

@@ -303,6 +303,10 @@
   .premium-hover {
     @apply transition-colors duration-300 hover:border-primary;
   }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
 }
 
 @layer base {

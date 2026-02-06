@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import {
-    ChevronLeft,
+    ArrowLeft,
     User,
     Mail,
     Phone,
@@ -27,7 +27,8 @@ import {
     Download,
     Star,
     Presentation
-} from 'lucide-react';
+}
+    from 'lucide-react';
 import { useTranslation } from '@/lib/i18n-context';
 import { format } from 'date-fns';
 import { enUS, ru as ruLocale } from 'date-fns/locale';
@@ -134,9 +135,8 @@ export default function AttemptDetailsPage() {
     if (error || !attempt) {
         return (
             <div className="space-y-4">
-                <Button variant="ghost" onClick={() => router.back()} className="gap-2">
-                    <ChevronLeft className="h-4 w-4" />
-                    {t('common.back')}
+                <Button variant="ghost" size="icon" onClick={() => router.back()}>
+                    <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <Card className="border-destructive/50 bg-destructive/10">
                     <CardHeader>
@@ -156,13 +156,14 @@ export default function AttemptDetailsPage() {
     const getStatusBadge = (status: string) => {
         const variants: Record<string, { variant: any; icon: any; label: string }> = {
             completed: { variant: 'default', icon: CheckCircle, label: t('dashboard.attempts.statuses.completed') },
+            in_progress: { variant: 'secondary', icon: Clock, label: t('dashboard.attempts.statuses.in_progress') },
             active: { variant: 'secondary', icon: Clock, label: t('dashboard.attempts.statuses.active') },
             expired: { variant: 'outline', icon: XCircle, label: t('dashboard.attempts.statuses.expired') },
             pending: { variant: 'secondary', icon: Clock, label: t('dashboard.invites.statuses.pending') },
             needs_review: { variant: 'outline', icon: AlertCircle, label: t('dashboard.attempts.statuses.needs_review') },
         };
 
-        const config = variants[status] || { variant: 'outline', icon: AlertCircle, label: status };
+        const config = variants[status] || { variant: 'outline', icon: AlertCircle, label: t(`dashboard.attempts.statuses.${status}`) || status };
         const Icon = config.icon;
 
         return (
@@ -176,9 +177,8 @@ export default function AttemptDetailsPage() {
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             <div className="flex items-center justify-between">
-                <Button variant="ghost" onClick={() => router.back()} className="gap-2">
-                    <ChevronLeft className="h-4 w-4" />
-                    {t('common.back')}
+                <Button variant="ghost" size="icon" onClick={() => router.back()}>
+                    <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div className="flex items-center gap-3">
                     {getStatusBadge(attempt.status)}
@@ -218,7 +218,7 @@ export default function AttemptDetailsPage() {
                         {attempt.candidate.telegram_id && (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                 <Send className="h-4 w-4 shrink-0 text-blue-500" />
-                                <span>ID: {attempt.candidate.telegram_id}</span>
+                                <span>{t('dashboard.attempts.labels.external_id')}: {attempt.candidate.telegram_id}</span>
                             </div>
                         )}
                     </CardContent>
@@ -264,7 +264,11 @@ export default function AttemptDetailsPage() {
                                         const h = Math.floor(totalSeconds / 3600);
                                         const m = Math.floor((totalSeconds % 3600) / 60);
                                         const s = totalSeconds % 60;
-                                        return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+                                        const parts = [];
+                                        if (h > 0) parts.push(`${h}${t('common.unit_h')}`);
+                                        if (m > 0 || h > 0) parts.push(`${m}${t('common.unit_m')}`);
+                                        parts.push(`${s}${t('common.unit_s')}`);
+                                        return parts.join(' ');
                                     })()}
                                 </p>
                             </div>
@@ -517,7 +521,7 @@ export default function AttemptDetailsPage() {
                                                         {answer.is_correct ? <CheckCircle className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
                                                     </div>
                                                     <p className="font-mono whitespace-pre-wrap break-words w-full">
-                                                        {typeof answer.candidate_answer === 'object' ? JSON.stringify(answer.candidate_answer) : (answer.candidate_answer || 'No answer')}
+                                                        {typeof answer.candidate_answer === 'object' ? JSON.stringify(answer.candidate_answer) : (answer.candidate_answer || t('dashboard.attempts.solution.no_answer'))}
                                                     </p>
                                                 </div>
                                             </div>
@@ -532,7 +536,7 @@ export default function AttemptDetailsPage() {
                                                 </div>
                                                 <div className="p-4 rounded-xl border-2 border-green-500/30 bg-green-500/10 text-green-800 dark:text-green-200 text-sm shadow-inner min-h-[100px] flex items-center overflow-hidden">
                                                     <p className="font-mono font-bold whitespace-pre-wrap break-words w-full">
-                                                        {typeof answer.correct_answer === 'object' ? JSON.stringify(answer.correct_answer) : (answer.correct_answer || 'N/A')}
+                                                        {typeof answer.correct_answer === 'object' ? JSON.stringify(answer.correct_answer) : (answer.correct_answer || t('common.not_applicable'))}
                                                     </p>
                                                 </div>
                                             </div>

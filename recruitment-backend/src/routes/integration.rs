@@ -2,7 +2,7 @@ use crate::{
     dto::integration_dto::{
         CreateTestPayload, EnqueueAiJobPayload, GenerateAiTestPayload,
         GenerateVacancyDescriptionPayload, UpdateTestPayload, GradePresentationPayload,
-        SendMessagePayload, CandidateStatusSync,
+        SendMessagePayload, CandidateStatusSync, DashboardStats,
     },
     error::Result,
     AppState,
@@ -363,8 +363,6 @@ pub async fn generate_ai_test(
     let skills: Vec<String> = payload.skills.clone().unwrap_or_default();
 
     let ai_future = state.ai_service.generate_test(
-        &state.embed_service,
-        &state.eval_service,
         &payload.profession,
         &skills,
         num_q,
@@ -529,8 +527,6 @@ pub async fn generate_test_spec(
     let title = format!("{} Assessment", payload.position);
 
     let ai_future = state.ai_service.generate_test(
-        &state.embed_service,
-        &state.eval_service,
         &payload.position,
         &skills,
         num_q,
@@ -576,6 +572,153 @@ pub async fn generate_test_spec(
         "created_at": test.created_at,
     });
     Ok((StatusCode::CREATED, Json(resp)))
+}
+
+// --- RESTORED ENDPOINTS ---
+
+#[axum::debug_handler]
+pub async fn send_message(
+    State(state): State<AppState>,
+    Json(payload): Json<SendMessagePayload>,
+) -> Result<impl IntoResponse> {
+    payload.validate()?;
+    
+    let candidate = if let Some(cid) = payload.candidate_id {
+        state.candidate_service.get_candidate(cid).await?
+            .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?
+    } else if let Some(tid) = payload.telegram_id {
+        state.candidate_service.get_by_telegram_id(tid).await?
+            .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?
+    } else {
+        return Err(crate::error::Error::BadRequest("Either candidate_id or telegram_id must be provided".into()));
+    };
+
+    let telegram_id = candidate.telegram_id.ok_or_else(|| {
+        crate::error::Error::BadRequest("Candidate has no associated Telegram ID".into())
+    })?;
+
+    let config = crate::config::get_config();
+    let url = format!("https://api.telegram.org/bot{}/sendMessage", config.telegram_bot_token);
+    let client = reqwest::Client::new();
+    
+    let telegram_body = json!({
+        "chat_id": telegram_id,
+        "text": payload.text,
+    });
+
+    let resp = client.post(&url)
+        .json(&telegram_body)
+        .send()
+        .await
+        .map_err(|e| crate::error::Error::Internal(format!("Failed to send to Telegram: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(crate::error::Error::Internal(format!("Telegram API error: {}", err_text)));
+    }
+
+    // Store the outgoing message
+    let create_msg = crate::models::message::CreateMessage {
+        candidate_id: candidate.id,
+        telegram_id,
+        direction: "outbound".to_string(),
+        text: payload.text.clone(),
+    };
+    let _ = state.message_service.create(create_msg).await;
+
+    Ok(Json(json!({ "status": "sent" })))
+}
+
+#[axum::debug_handler]
+pub async fn get_chat_messages(
+    State(state): State<AppState>,
+    Path(candidate_id): Path<Uuid>,
+) -> Result<impl IntoResponse> {
+    let messages = state.message_service.get_by_candidate(candidate_id).await?;
+    
+    // Mark inbound messages as read
+    let _ = state.message_service.mark_as_read(candidate_id).await;
+    
+    Ok(Json(messages))
+}
+
+#[axum::debug_handler]
+pub async fn get_unread_count(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let count = state.message_service.total_unread_count().await?;
+    Ok(Json(json!({ "unread_count": count })))
+}
+
+pub async fn sync_candidate_statuses(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let statuses = sqlx::query_as!(
+        CandidateStatusSync,
+        r#"
+        SELECT DISTINCT ON (c.id)
+            c.id,
+            c.telegram_id::text as external_id,
+            c.name as "name!",
+            c.email as "email!",
+            COALESCE(ta.status, 'pending') as "status!",
+            COALESCE(ta.updated_at, c.updated_at, NOW()) as "last_updated!"
+        FROM candidates c
+        LEFT JOIN test_attempts ta ON c.email = ta.candidate_email
+        ORDER BY c.id, ta.updated_at DESC NULLS LAST
+        "#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(statuses))
+}
+
+pub async fn get_dashboard_stats(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    // 1. Candidate Status Counts
+    let candidates_status = state.candidate_service.get_status_counts().await?;
+    let total_candidates: i64 = candidates_status.values().sum();
+
+    // 2. Unread Messages
+    let unread_messages = state.message_service.total_unread_count().await?;
+
+    // 3. Active Tests
+    let tests_list = state.test_service.list_tests(
+        1, 
+        1, 
+        Some(crate::services::test_service::TestFilter {
+            is_active: Some(true),
+            created_by: None,
+            search: None,
+        })
+    ).await?;
+    let active_tests = tests_list.total;
+
+    // 4. Active Vacancies (assuming all published vacancies are active)
+    let active_vacancies = match state.vacancy_service.list_published(1000).await {
+        Ok(v) => v.len() as i64,
+        Err(e) => {
+            tracing::error!("Failed to fetch vacancies for dashboard: {:?}", e);
+            0
+        }
+    };
+
+    let candidates_history = state.candidate_service.get_history_counts().await?;
+    let attempts_status = state.attempt_service.get_status_distribution().await?;
+
+    let stats = DashboardStats {
+        total_candidates,
+        unread_messages,
+        active_tests,
+        active_vacancies,
+        candidates_by_status: candidates_status,
+        candidates_history,
+        attempts_status,
+    };
+
+    Ok(Json(stats))
 }
 
 pub async fn delete_test_invite(
@@ -730,6 +873,22 @@ pub async fn poll_notifications(
     .await
     .map_err(|e| crate::error::Error::Internal(format!("Failed to fetch candidates: {}", e)))?;
 
+    let total_new_candidates = sqlx::query!(
+        "SELECT COUNT(*) as count FROM candidates WHERE status = 'new'"
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| crate::error::Error::Internal(format!("Failed to count new candidates: {}", e)))?
+    .count.unwrap_or(0);
+
+    let total_needs_review_attempts = sqlx::query!(
+        "SELECT COUNT(*) as count FROM test_attempts WHERE status = 'needs_review'"
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| crate::error::Error::Internal(format!("Failed to count review attempts: {}", e)))?
+    .count.unwrap_or(0);
+
     let updated_attempts = sqlx::query!(
         r#"
         SELECT id, candidate_name, status, started_at, completed_at, test_id 
@@ -757,53 +916,15 @@ pub async fn poll_notifications(
             "status": a.status,
             "test_id": a.test_id,
             "timestamp": a.completed_at.or(a.started_at)
-        })).collect::<Vec<_>>()
+        })).collect::<Vec<_>>(),
+        "counts": {
+            "candidates": total_new_candidates,
+            "attempts": total_needs_review_attempts
+        }
     })))
 }
 
-#[axum::debug_handler]
-pub async fn send_message(
-    State(state): State<AppState>,
-    Json(payload): Json<SendMessagePayload>,
-) -> Result<impl IntoResponse> {
-    payload.validate()?;
-    
-    let target_telegram_id = if let Some(tid) = payload.telegram_id {
-        Some(tid)
-    } else if let Some(cid) = payload.candidate_id {
-        let candidate = state.candidate_service.get_candidate(cid).await?
-            .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
-        candidate.telegram_id
-    } else {
-        return Err(crate::error::Error::BadRequest("Either candidate_id or telegram_id must be provided".into()));
-    };
 
-    let telegram_id = target_telegram_id.ok_or_else(|| {
-        crate::error::Error::BadRequest("Candidate has no associated Telegram ID".into())
-    })?;
-
-    let config = crate::config::get_config();
-    let url = format!("https://api.telegram.org/bot{}/sendMessage", config.telegram_bot_token);
-    let client = reqwest::Client::new();
-    
-    let telegram_body = json!({
-        "chat_id": telegram_id,
-        "text": payload.text,
-    });
-
-    let resp = client.post(&url)
-        .json(&telegram_body)
-        .send()
-        .await
-        .map_err(|e| crate::error::Error::Internal(format!("Failed to send to Telegram: {}", e)))?;
-
-    if !resp.status().is_success() {
-        let err_text = resp.text().await.unwrap_or_default();
-        return Err(crate::error::Error::Internal(format!("Telegram API error: {}", err_text)));
-    }
-
-    Ok(Json(json!({ "status": "sent" })))
-}
 
 pub async fn list_all_tests(
     State(state): State<AppState>,
@@ -812,29 +933,7 @@ pub async fn list_all_tests(
     Ok(Json(result.tests))
 }
 
-pub async fn sync_candidate_statuses(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse> {
-    let statuses = sqlx::query_as!(
-        CandidateStatusSync,
-        r#"
-        SELECT DISTINCT ON (c.id)
-            c.id,
-            c.telegram_id::text as external_id,
-            c.name as "name!",
-            c.email as "email!",
-            COALESCE(ta.status, 'pending') as "status!",
-            COALESCE(ta.updated_at, c.updated_at, NOW()) as "last_updated!"
-        FROM candidates c
-        LEFT JOIN test_attempts ta ON c.email = ta.candidate_email
-        ORDER BY c.id, ta.updated_at DESC NULLS LAST
-        "#
-    )
-    .fetch_all(&state.pool)
-    .await?;
 
-    Ok(Json(statuses))
-}
 
 pub async fn list_attempts_for_review(
     State(state): State<AppState>,
@@ -846,3 +945,7 @@ pub async fn list_attempts_for_review(
     
     Ok(Json(items))
 }
+
+
+
+

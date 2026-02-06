@@ -16,7 +16,7 @@ impl CandidateService {
     pub async fn get_by_telegram_id(&self, telegram_id: i64) -> Result<Option<Candidate>> {
         let candidate = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at FROM candidates WHERE telegram_id = $1"#,
+            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates WHERE telegram_id = $1"#,
             telegram_id
         )
         .fetch_optional(&self.pool)
@@ -27,7 +27,7 @@ impl CandidateService {
     pub async fn get_candidate(&self, id: uuid::Uuid) -> Result<Option<Candidate>> {
         let candidate = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at FROM candidates WHERE id = $1"#,
+            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates WHERE id = $1"#,
             id
         )
         .fetch_optional(&self.pool)
@@ -76,9 +76,9 @@ impl CandidateService {
         let candidate = sqlx::query_as!(
             Candidate,
             r#"
-            INSERT INTO candidates (telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at
+            INSERT INTO candidates (telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new')
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
             "#,
             telegram_id,
             name,
@@ -105,7 +105,7 @@ impl CandidateService {
             UPDATE candidates
             SET cv_url = $1, updated_at = NOW()
             WHERE id = $2
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
             "#,
             cv_url,
             id
@@ -118,7 +118,7 @@ impl CandidateService {
     pub async fn list_candidates(&self) -> Result<Vec<Candidate>> {
         let candidates = sqlx::query_as!(
             Candidate,
-            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at FROM candidates ORDER BY created_at DESC"#
+            r#"SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at FROM candidates ORDER BY created_at DESC"#
         )
         .fetch_all(&self.pool)
         .await?;
@@ -158,7 +158,7 @@ impl CandidateService {
         let candidates = sqlx::query_as!(
             Candidate,
             r#"
-            SELECT c.id, c.telegram_id, c.name, c.email, c.phone, c.cv_url, c.dob, c.vacancy_id, c.profile_data, c.ai_rating, c.ai_comment, c.created_at, c.updated_at
+            SELECT c.id, c.telegram_id, c.name, c.email, c.phone, c.cv_url, c.dob, c.vacancy_id, c.profile_data, c.ai_rating, c.ai_comment, c.status, c.created_at, c.updated_at
             FROM candidates c
             JOIN candidate_applications ca ON c.id = ca.candidate_id
             WHERE ca.vacancy_id = $1
@@ -178,7 +178,7 @@ impl CandidateService {
             UPDATE candidates
             SET ai_rating = $1, ai_comment = $2, updated_at = NOW()
             WHERE id = $3
-            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, created_at, updated_at
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
             "#,
             rating,
             comment,
@@ -187,5 +187,56 @@ impl CandidateService {
         .fetch_one(&self.pool)
         .await?;
         Ok(candidate)
+    }
+
+    pub async fn update_status(&self, id: uuid::Uuid, status: String) -> Result<Candidate> {
+        let candidate = sqlx::query_as!(
+            Candidate,
+            r#"
+            UPDATE candidates
+            SET status = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at
+            "#,
+            status,
+            id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(candidate)
+    }
+
+    pub async fn get_status_counts(&self) -> Result<std::collections::HashMap<String, i64>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT status, COUNT(*) as count
+            FROM candidates
+            GROUP BY status
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut counts = std::collections::HashMap::new();
+        for row in rows {
+            counts.insert(row.status, row.count.unwrap_or(0));
+        }
+        Ok(counts)
+    }
+
+    pub async fn get_history_counts(&self) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as "date!", COUNT(*) as "count!"
+            FROM candidates
+            WHERE created_at > NOW() - INTERVAL '7 days'
+            GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+            ORDER BY "date!"
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| (r.date, r.count)).collect())
     }
 }

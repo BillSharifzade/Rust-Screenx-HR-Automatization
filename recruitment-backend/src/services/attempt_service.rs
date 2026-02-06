@@ -557,6 +557,20 @@ impl AttemptService {
 
         Ok(())
     }
+
+    pub async fn get_status_distribution(&self) -> Result<std::collections::HashMap<String, i64>> {
+        let rows = sqlx::query!(
+            r#"SELECT status as "status!", COUNT(*) as "count!" FROM test_attempts GROUP BY status"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            map.insert(row.status, row.count);
+        }
+        Ok(map)
+    }
 }
 
 #[derive(Debug, Clone)]
