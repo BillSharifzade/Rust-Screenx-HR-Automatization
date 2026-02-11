@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-// --- DTOs ---
-
 #[derive(Debug, Deserialize)]
 pub struct OneFSendMessageRequest {
     pub candidate_id: Uuid,
@@ -25,10 +23,29 @@ pub struct OneFUpdateStatusRequest {
     pub status: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct OneFCreateInviteRequest {
+    pub candidate_id: Uuid,
+    pub test_id: Uuid,
+    pub expires_in_hours: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OneFTestSummary {
+    pub id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+    pub test_type: String,
+    pub duration_minutes: i32,
+    pub passing_score: f64,
+    pub is_active: bool,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct OneFChatMessage {
     pub id: Uuid,
-    pub direction: String, // "inbound" | "outbound"
+    pub direction: String,
     pub text: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub is_read: bool,
@@ -66,14 +83,10 @@ pub struct OneFCandidateResponse {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-// --- Endpoints ---
-
-/// Send a message to a candidate via Telegram
 pub async fn send_message(
     State(state): State<AppState>,
     Json(payload): Json<OneFSendMessageRequest>,
 ) -> Result<impl IntoResponse> {
-    // 1. Validate candidate exists
     let candidate = state.candidate_service.get_candidate(payload.candidate_id).await?
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
 
@@ -81,7 +94,6 @@ pub async fn send_message(
         crate::error::Error::BadRequest("Candidate has no linked Telegram account".into())
     })?;
 
-    // 2. Send via Telegram Bot API
     let config = crate::config::get_config();
     let url = format!("https://api.telegram.org/bot{}/sendMessage", config.telegram_bot_token);
     let client = reqwest::Client::new();
@@ -102,7 +114,6 @@ pub async fn send_message(
         return Err(crate::error::Error::Internal(format!("Telegram API error: {}", err_text)));
     }
 
-    // 3. Store message in DB
     let create_msg = crate::models::message::CreateMessage {
         candidate_id: candidate.id,
         telegram_id,
@@ -110,22 +121,17 @@ pub async fn send_message(
         text: payload.text,
     };
     
-    // We use the existing message service
     let _ = state.message_service.create(create_msg).await?;
 
     Ok(StatusCode::OK)
 }
 
-/// Get chat history for a candidate (Read-only, does not mark as read)
 pub async fn get_chat_history(
     State(state): State<AppState>,
     Path(candidate_id): Path<Uuid>,
 ) -> Result<impl IntoResponse> {
-    // We use generic message service. Note: This assumes get_by_candidate doesn't side-effect.
-    // Inspection of message_service.rs showed get_by_candidate is just a SELECT.
     let messages = state.message_service.get_by_candidate(candidate_id).await?;
     
-    // Mark inbound messages as read if accessed by 1F (implicit read)
     let _ = state.message_service.mark_as_read(candidate_id).await;
     
     let onef_messages: Vec<OneFChatMessage> = messages.into_iter().map(|m| OneFChatMessage {
@@ -139,7 +145,6 @@ pub async fn get_chat_history(
     Ok(Json(onef_messages))
 }
 
-/// Get total count of unread messages from all candidates
 pub async fn get_unread_count(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
@@ -147,20 +152,12 @@ pub async fn get_unread_count(
     Ok(Json(json!({ "unread_count": count })))
 }
 
-/// Get aggregated statistics for 1F Dashboard
 pub async fn get_dashboard_stats(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
-    // Reuse existing high-level services to aggregate data
     
-    // 1. Basic counts
     let total_candidates_map = state.candidate_service.get_status_counts().await?;
     let total_candidates: i64 = total_candidates_map.values().sum();
-    
-    // 2. New candidates today - would need a new service method or query. 
-    // For now, let's approximate or use history counts if available, 
-    // but to be safe and quick, we'll do a direct count query here or reuse existing if possible.
-    // Leveraging candidate_service.get_history_counts() which returns last 7 days.
     let history = state.candidate_service.get_history_counts().await?;
     let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let candidates_new_today = history.iter()
@@ -168,18 +165,17 @@ pub async fn get_dashboard_stats(
         .map(|(_, count)| *count)
         .unwrap_or(0);
 
-    // 3. Active vacancies
-    let active_vacancies = state.vacancy_service.list_published(1).await?.len() as i64; // This might be slow if list is huge, but usually vacancies are few.
+    let internal_vacancies = state.vacancy_service.list_published(50).await?.len() as i64;
+    let external_vacancies = state.koinotinav_service.fetch_vacancies().await.map(|v| v.len() as i64).unwrap_or(0);
+    let active_vacancies = internal_vacancies + external_vacancies;
     
-    // 4. Test attempts
     let attempts_status = state.attempt_service.get_status_distribution().await?;
     let test_attempts_pending = *attempts_status.get("pending").unwrap_or(&0);
     let test_completed = *attempts_status.get("completed").unwrap_or(&0) + *attempts_status.get("passed").unwrap_or(&0) + *attempts_status.get("failed").unwrap_or(&0);
 
-    // 5. Funnel (Simplified estimation based on available data)
     let funnel = RecruitmentFunnel {
         registered: total_candidates,
-        applied: total_candidates, // Assuming registration = application for now, or refine if we have 'new' status
+        applied: total_candidates,
         test_started: *attempts_status.get("in_progress").unwrap_or(&0) + test_completed,
         test_completed,
         hired: *total_candidates_map.get("accepted").unwrap_or(&0),
@@ -196,7 +192,6 @@ pub async fn get_dashboard_stats(
     Ok(Json(stats))
 }
 
-/// Update candidate status from 1F (e.g. "rejected", "hired")
 pub async fn update_candidate_status(
     State(state): State<AppState>,
     Path(candidate_id): Path<Uuid>,
@@ -204,9 +199,7 @@ pub async fn update_candidate_status(
 ) -> Result<impl IntoResponse> {
     let _updated = state.candidate_service.update_status(candidate_id, payload.status.clone()).await?;
     
-    // Optionally notify candidate via Telegram if needed?
-    // For now just update DB.
-    
+
     Ok(Json(json!({ 
         "id": candidate_id, 
         "status": payload.status,
@@ -214,7 +207,6 @@ pub async fn update_candidate_status(
     })))
 }
 
-/// Get candidate details including AI suitability
 pub async fn get_candidate(
     State(state): State<AppState>,
     Path(candidate_id): Path<Uuid>,
@@ -238,7 +230,6 @@ pub async fn get_candidate(
     Ok(Json(response))
 }
 
-/// List test attempts for a candidate
 pub async fn get_candidate_attempts(
     State(state): State<AppState>,
     Path(candidate_id): Path<Uuid>,
@@ -255,7 +246,6 @@ pub async fn get_candidate_attempts(
     })))
 }
 
-/// Get detailed test attempt results
 pub async fn get_test_attempt(
     State(state): State<AppState>,
     Path(attempt_id): Path<Uuid>,
@@ -263,7 +253,6 @@ pub async fn get_test_attempt(
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
     let attempt = svc.get_attempt_by_id(attempt_id).await?;
     
-    // Also fetch test title/info for context
     let test = state.test_service.get_test_by_id(attempt.test_id).await?;
 
     Ok(Json(json!({
@@ -273,7 +262,47 @@ pub async fn get_test_attempt(
     })))
 }
 
-/// List published vacancies
+pub async fn list_candidates(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let candidates = state.candidate_service.list_candidates().await?;
+    
+    let response: Vec<OneFCandidateResponse> = candidates.into_iter().map(|c| OneFCandidateResponse {
+        id: c.id,
+        telegram_id: c.telegram_id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        cv_url: c.cv_url,
+        status: c.status,
+        ai_rating: c.ai_rating,
+        ai_comment: c.ai_comment,
+        created_at: c.created_at,
+    }).collect();
+
+    Ok(Json(response))
+}
+
+pub async fn list_all_attempts(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<impl IntoResponse> {
+    let status = params.get("status").cloned();
+    let email = params.get("email").cloned();
+    let page = params.get("page").and_then(|v| v.parse().ok()).unwrap_or(1);
+    let limit = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+
+    let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
+    let (items, total) = svc.list_attempts(None, email, status, page, limit).await?;
+
+    Ok(Json(json!({
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit
+    })))
+}
+
 pub async fn list_vacancies(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
@@ -281,11 +310,183 @@ pub async fn list_vacancies(
     Ok(Json(vacancies))
 }
 
-/// Get specific vacancy details
 pub async fn get_vacancy(
     State(state): State<AppState>,
     Path(vacancy_id): Path<Uuid>,
 ) -> Result<impl IntoResponse> {
     let vacancy = state.vacancy_service.get_by_id(vacancy_id).await?;
     Ok(Json(vacancy))
+}
+
+/// List all active tests available for invitations
+pub async fn list_tests(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let result = state.test_service.list_tests(
+        1,
+        100,
+        Some(crate::services::test_service::TestFilter {
+            is_active: Some(true),
+            created_by: None,
+            search: None,
+        })
+    ).await?;
+
+    let tests: Vec<OneFTestSummary> = result.tests.into_iter().map(|t| {
+        use rust_decimal::prelude::ToPrimitive;
+        OneFTestSummary {
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            test_type: t.test_type,
+            duration_minutes: t.duration_minutes,
+            passing_score: t.passing_score.to_f64().unwrap_or(0.0),
+            is_active: t.is_active.unwrap_or(true),
+            created_at: t.created_at,
+        }
+    }).collect();
+
+    Ok(Json(json!({
+        "items": tests,
+        "total": result.total
+    })))
+}
+
+
+pub async fn list_candidate_statuses(
+    State(_state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    Ok(Json(json!([
+        { "id": "new", "label": "New" },
+        { "id": "reviewing", "label": "Reviewing" },
+        { "id": "test_assigned", "label": "Test Assigned" },
+        { "id": "test_completed", "label": "Test Completed" },
+        { "id": "interview", "label": "Interview" },
+        { "id": "accepted", "label": "Accepted" },
+        { "id": "rejected", "label": "Rejected" }
+    ])))
+}
+
+pub async fn list_test_statuses(
+    State(_state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    Ok(Json(json!([
+        { "id": "pending", "label": "Pending (Invite Sent)" },
+        { "id": "in_progress", "label": "In Progress" },
+        { "id": "completed", "label": "Completed (Waiting for Grading)" },
+        { "id": "needs_review", "label": "Needs Manual Review" },
+        { "id": "passed", "label": "Passed" },
+        { "id": "failed", "label": "Failed" },
+        { "id": "timeout", "label": "Timed Out" },
+        { "id": "escaped", "label": "Escaped (Left Test)" }
+    ])))
+}
+
+/// Create a test invitation for a candidate
+pub async fn create_test_invite(
+    State(state): State<AppState>,
+    Json(payload): Json<OneFCreateInviteRequest>,
+) -> Result<impl IntoResponse> {
+    // Look up the candidate
+    let candidate = state.candidate_service.get_candidate(payload.candidate_id).await?
+        .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
+
+    let expires_in_hours = payload.expires_in_hours.unwrap_or(48);
+
+    let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
+    let result = svc.create_invite(
+        payload.test_id,
+        crate::services::attempt_service::InviteCandidate {
+            external_id: candidate.telegram_id.map(|id| id.to_string()),
+            name: candidate.name.clone(),
+            email: candidate.email.clone(),
+            telegram_id: candidate.telegram_id,
+            phone: candidate.phone.clone(),
+        },
+        expires_in_hours,
+        Some(json!({ "source": "onef" })),
+    ).await?;
+
+    // Fetch test info for the Telegram notification
+    let test = state.test_service.get_test_by_id(payload.test_id).await?;
+
+    // Send Telegram notification to the candidate
+    if let Some(telegram_id) = candidate.telegram_id {
+        let config = crate::config::get_config();
+        let webapp_url = &config.webapp_url;
+        let bot_token = &config.telegram_bot_token;
+
+        let message_text = if test.test_type == "presentation" {
+            let themes_count = test.presentation_themes
+                .as_ref()
+                .and_then(|t| t.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let deadline_hours = test.duration_minutes / 60;
+            format!(
+                "Вам назначена презентация: {}\n\nКоличество тем: {}\nСрок выполнения: {} часов\n\nНажмите кнопку ниже, чтобы просмотреть задание.",
+                test.title, themes_count, deadline_hours
+            )
+        } else {
+            format!(
+                "Вам назначен тест: {}\n\nНажмите кнопку ниже, чтобы начать прохождение теста.",
+                test.title
+            )
+        };
+
+        let reply_markup = json!({
+            "inline_keyboard": [[
+                {
+                    "text": "Профиль",
+                    "web_app": { "url": webapp_url }
+                }
+            ]]
+        });
+
+        let telegram_body = json!({
+            "chat_id": telegram_id,
+            "text": message_text,
+            "reply_markup": reply_markup,
+        });
+
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
+        let client = reqwest::Client::new();
+        if let Err(e) = client.post(&url).json(&telegram_body).send().await {
+            tracing::warn!("Failed to send Telegram notification for OneF invite: {}", e);
+        } else {
+            tracing::info!("OneF invite: Telegram notification sent to chat_id: {}", telegram_id);
+        }
+    }
+
+    // Enqueue webhook notification
+    let notif = crate::services::notification_service::NotificationService::new(
+        state.pool.clone(),
+        crate::config::get_config().telegram_bot_webhook_url.clone(),
+    );
+    let assigned = crate::dto::webhook_dto::TestAssignedWebhook {
+        event: "test_assigned".to_string(),
+        attempt_id: result.attempt_id,
+        candidate: crate::dto::webhook_dto::WebhookCandidate {
+            name: candidate.name.clone(),
+            telegram_id: candidate.telegram_id,
+        },
+        test: crate::dto::webhook_dto::WebhookTest {
+            title: test.title.clone(),
+        },
+        access_token: result.access_token.clone(),
+        expires_at: result.expires_at,
+    };
+    let payload_json = serde_json::to_value(&assigned)?;
+    let _ = notif.enqueue_webhook("test_assigned", &payload_json).await;
+
+    let config = crate::config::get_config();
+    Ok((StatusCode::CREATED, Json(json!({
+        "attempt_id": result.attempt_id,
+        "access_token": result.access_token,
+        "test_url": format!("{}/test/{}", config.webapp_url, result.access_token),
+        "expires_at": result.expires_at,
+        "status": result.status,
+        "candidate_name": candidate.name,
+        "test_title": test.title,
+    }))))
 }

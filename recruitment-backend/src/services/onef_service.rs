@@ -10,6 +10,7 @@ pub struct OneFRequestWrapper {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFApplicationPayload {
+    pub event_type: String,
     pub vacancy_id: i64,
     pub vacancy_name: String,
     pub candidate: OneFCandidateInfo,
@@ -37,11 +38,41 @@ pub struct OneFCandidateInfo {
     pub dob: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cv_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_rating: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_comment: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFWebhookResponse {
     pub success: bool,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OneFTestStatusPayload {
+    pub event_type: String,
+    pub attempt_id: uuid::Uuid,
+    pub candidate_id: uuid::Uuid,
+    pub test_id: uuid::Uuid,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percentage: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passed: Option<bool>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OneFCandidateStatusPayload {
+    pub event_type: String,
+    pub candidate_id: uuid::Uuid,
+    pub status: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone)]
@@ -83,6 +114,8 @@ impl OneFService {
         phone: Option<String>,
         dob: Option<chrono::NaiveDate>,
         cv_url: Option<String>,
+        ai_rating: Option<i32>,
+        ai_comment: Option<String>,
     ) -> Result<(), String> {
         let webhook_url = match &self.webhook_url {
             Some(url) => url,
@@ -104,6 +137,7 @@ impl OneFService {
         };
 
         let payload = OneFApplicationPayload {
+            event_type: "new_application".to_string(),
             vacancy_id,
             vacancy_name,
             candidate: OneFCandidateInfo {
@@ -120,6 +154,8 @@ impl OneFService {
                     let clean_path = path.trim_start_matches("./");
                     format!("{}/{}", config.webapp_url.trim_end_matches('/'), clean_path)
                 }),
+                ai_rating,
+                ai_comment,
             },
             applied_at: chrono::Utc::now().to_rfc3339(),
         };
@@ -171,6 +207,7 @@ impl OneFService {
         };
 
         let payload = json!({
+            "event_type": "grade_shared",
             "candidate_id": candidate_id,
             "grade": grade,
             "shared_at": chrono::Utc::now().to_rfc3339(),
@@ -225,8 +262,6 @@ impl OneFService {
             "received_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        // Wrap in requestBody to match OneF expectation if consistent style is needed,
-        // or send flat. Based on existing code, OneF expects requestBody wrapper.
         let wrapper = json!({
             "requestBody": payload
         });
@@ -242,9 +277,79 @@ impl OneFService {
         if !response.status().is_success() {
             let body = response.text().await.unwrap_or_default();
             error!("1F message forwarding failed: {}", body);
-            // We logged it, but maybe we don't want to break the flow?
-            // Returning error allows caller to decide.
         }
+        Ok(())
+    }
+
+    pub async fn notify_test_status(
+        &self,
+        payload: OneFTestStatusPayload,
+    ) -> Result<(), String> {
+        let webhook_url = match &self.webhook_url {
+            Some(url) => url,
+            None => return Ok(()),
+        };
+
+        let wrapper = json!({
+            "requestBody": payload
+        });
+
+        info!(
+            "Pushing test status update to 1F: attempt {} status {}",
+            payload.attempt_id, payload.status
+        );
+
+        let response = self.client.post(webhook_url)
+            .json(&wrapper)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!("1F test status update failed: {}", body);
+        }
+
+        Ok(())
+    }
+
+    pub async fn notify_candidate_status(
+        &self,
+        candidate_id: uuid::Uuid,
+        status: String,
+    ) -> Result<(), String> {
+        let webhook_url = match &self.webhook_url {
+            Some(url) => url,
+            None => return Ok(()),
+        };
+
+        let payload = OneFCandidateStatusPayload {
+            event_type: "candidate_status_changed".to_string(),
+            candidate_id,
+            status,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let wrapper = json!({
+            "requestBody": payload
+        });
+
+        info!(
+            "Pushing candidate status update to 1F: candidate {} status {}",
+            candidate_id, payload.status
+        );
+
+        let response = self.client.post(webhook_url)
+            .json(&wrapper)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!("1F candidate status update failed: {}", body);
+        }
+
         Ok(())
     }
 

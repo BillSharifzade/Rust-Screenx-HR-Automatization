@@ -1,256 +1,276 @@
 # 1F Integration Documentation
 
-**Version:** 1.1  
+**Version:** 1.2  
+**Last Updated:** 2026-02-11  
 **Target Audience:** 1F Developers / Integrators
 
 ---
 
 ## 1. Overview
-This integration consists of two API sets:
-1.  **V2 Dedicated API (Recommended)**: Specifically designed for OneF, providing properly formatted data arrays and simplified interactions.
-2.  **V1 Internal API (Legacy)**: Shared with the internal Recruitment Frontend. Can be used for advanced data syncing if needed.
+The OneF (1F) integration allows for real-time synchronization of recruitment data, candidate communication via Telegram, and management of technical assessments.
 
-All endpoints are hosted at: `https://your-recruitment-domain.com`
+All dedicated OneF endpoints are hosted at: `https://your-recruitment-domain.com/api/onef/`
+
+### Authentication
+Currently, the OneF API routes are protected by a rate-limiting layer. Ensure your requests do not exceed the configured `INTEGRATION_RPS` (default: 10 requests per second). Authenticated access via API keys is planned for future versions.
 
 ---
 
 ## 2. Webhooks (Real-Time Push)
 
-Enable real-time updates by configuring `ONEF_WEBHOOK_URL`.
+Enable real-time updates by configuring the `ONEF_WEBHOOK_URL` environment variable. All webhooks are sent as `POST` requests with a standard JSON wrapper.
 
-### New Application
-Triggered when a candidate applies.
+### Standard Request Wrapper
+```json
+{
+  "requestBody": {
+    "event_type": "string",
+    ...
+  }
+}
+```
+
+### 2.1 New Application (`new_application`)
+Triggered when a candidate applies for a vacancy (internal or external).
 ```json
 {
   "requestBody": {
     "event_type": "new_application",
     "vacancy_id": 123,
+    "vacancy_name": "Senior Rust Developer",
+    "applied_at": "2026-02-11T12:00:00Z",
     "candidate": {
       "id": "uuid",
-      "name": "John Doe",
-      "telegram_id": 123456789
+      "telegram_id": 123456789,
+      "fullname": "John Doe",
+      "name": "John",
+      "surname": "Doe",
+      "email": "john@example.com",
+      "phone": "+123456789",
+      "dob": "1990-01-01",
+      "cv_url": "https://domain.com/uploads/cv/uuid.pdf",
+      "ai_rating": 85,
+      "ai_comment": "Strong match based on experience."
     }
   }
 }
 ```
 
-### New Message
-Triggered when a candidate sends a message via Telegram.
+### 2.2 New Message (`new_message`)
+Triggered when a candidate sends a message via the Telegram bot.
 ```json
 {
   "requestBody": {
     "event_type": "new_message",
     "candidate_id": "uuid",
     "telegram_id": 123456789,
-    "text": "Hello!",
-    "received_at": "2024-02-06T10:00:00Z"
+    "text": "Hello, I have a question about the test.",
+    "received_at": "2026-02-11T12:05:00Z"
+  }
+}
+```
+
+### 2.3 Candidate Status Changed (`candidate_status_changed`)
+Triggered when an HR manager updates a candidate's status.
+```json
+{
+  "requestBody": {
+    "event_type": "candidate_status_changed",
+    "candidate_id": "uuid",
+    "status": "reviewing",
+    "updated_at": "2026-02-11T12:10:00Z"
+  }
+}
+```
+
+### 2.4 Test Status Changed (`test_status_changed`)
+Triggered when a candidate starts or submits a test.
+```json
+{
+  "requestBody": {
+    "event_type": "test_status_changed",
+    "attempt_id": "uuid",
+    "candidate_id": "uuid",
+    "test_id": "uuid",
+    "status": "in_progress", 
+    "score": 85.0,
+    "max_score": 100.0,
+    "percentage": 85.0,
+    "passed": true,
+    "updated_at": "2026-02-11T12:15:00Z"
+  }
+}
+```
+*Note: `score`, `max_score`, `percentage`, and `passed` are only present when the status is `completed`, `passed`, or `failed`.*
+
+### 2.5 Grade Shared (`grade_shared`)
+Triggered when a grade is manually shared with OneF.
+```json
+{
+  "requestBody": {
+    "event_type": "grade_shared",
+    "candidate_id": "uuid",
+    "grade": 90,
+    "shared_at": "2026-02-11T12:20:00Z"
   }
 }
 ```
 
 ---
 
-## 3. V2: Dedicated OneF API (Recommended)
+## 3. V2: Dedicated OneF API Endpoints
 
 ### 3.1 Dashboard Stats
-Optimized dashboard metrics object.
-
-*   **Endpoint:** `GET /api/onef/dashboard`
+*   **Endpoint:** `GET /dashboard`
+*   **Description:** Retrieves high-level recruitment metrics.
 *   **Response:**
 ```json
 {
-  "candidates_total": 150,
-  "candidates_new_today": 5,
-  "active_vacancies": 12,
-  "test_attempts_pending": 8,
+  "candidates_total": 1500,
+  "candidates_new_today": 12,
+  "active_vacancies": 45,
+  "test_attempts_pending": 82,
   "recruitment_funnel": {
-    "registered": 150,
-    "applied": 145,
-    "test_started": 100,
-    "test_completed": 85,
-    "hired": 5
+    "registered": 1500,
+    "applied": 1420,
+    "test_started": 800,
+    "test_completed": 650,
+    "hired": 52
   }
 }
 ```
 
-### 3.2 Chat History
-Returns a flat list of messages suitable for a chat UI. Automatically marks inbound messages as read.
+### 3.2 Candidate Management
 
-*   **Endpoint:** `GET /api/onef/messages/{candidate_id}`
+#### List Candidates
+*   **Endpoint:** `GET /candidates`
+*   **Description:** Retrieves a list of all candidates.
+*   **Response:** Array of Candidate objects.
+
+#### Get Candidate Details
+*   **Endpoint:** `GET /candidates/{id}`
+*   **Description:** Retrieves full profile information for a specific candidate.
+
+#### Update Candidate Status
+*   **Endpoint:** `POST /candidates/{id}/status`
+*   **Payload:** `{ "status": "reviewing" }`
+*   **Response:** `{ "id": "uuid", "status": "reviewing", "updated_at": "..." }`
+
+#### Trigger AI Analysis
+*   **Endpoint:** `POST /candidates/{id}/analyze`
+*   **Description:** Manually triggers a new AI suitability analysis.
+*   **Response:** Updated Candidate object.
+
+---
+
+### 3.3 Chat & Communication
+
+#### Get Chat History
+*   **Endpoint:** `GET /messages/{candidate_id}`
+*   **Description:** Returns all messages for a candidate. Automatically marks inbound messages as read.
 *   **Response:**
 ```json
 [
   {
     "id": "uuid",
     "direction": "inbound",
-    "text": "I am interested",
-    "created_at": "2024-02-06T10:00:00Z",
-    "is_read": true
-  },
-  {
-    "id": "uuid",
-    "direction": "outbound",
-    "text": "Great, let's schedule a call",
-    "created_at": "2024-02-06T10:05:00Z",
+    "text": "Hello!",
+    "created_at": "...",
     "is_read": true
   }
 ]
 ```
 
-### 3.3 Send Message
-Send a message from 1F to the candidate (via Telegram).
-
-*   **Endpoint:** `POST /api/onef/messages`
+#### Send Message
+*   **Endpoint:** `POST /messages`
+*   **Description:** Sends a message to the candidate via Telegram.
 *   **Payload:**
 ```json
 {
   "candidate_id": "uuid",
-  "text": "Hello, are you free?"
+  "text": "Your interview is scheduled for tomorrow."
 }
 ```
 
-### 3.4 Unread Count
-Total unread messages for notification badges.
-
-*   **Endpoint:** `GET /api/onef/messages/unread`
-*   **Response:** `{"unread_count": 3}`
-
-### 3.5 Get Candidate Details
-Retrieves full candidate information, including AI suitability scores.
-
-*   **Endpoint:** `GET /api/onef/candidates/{id}`
-*   **Response:**
-```json
-{
-  "id": "uuid",
-  "telegram_id": 123456789,
-  "name": "John Doe",
-  "email": "john@example.com",
-  "phone": "+123456789",
-  "cv_url": "uploads/cv/uuid.pdf",
-  "status": "new",
-  "ai_rating": 85,
-  "ai_comment": "Strong technical skills...",
-  "created_at": "2024-02-06T10:00:00Z"
-}
-```
-
-### 3.7 Update Candidate Status
-Sync recruiting decisions from 1F to the platform.
-
-*   **Endpoint:** `POST /api/onef/candidates/{id}/status`
-*   **Payload:**
-```json
-{
-  "status": "accepted"
-}
-```
-*Statuses:* `new`, `reviewing`, `accepted`, `rejected`.
-
-### 3.8 List Vacancies
-Get all published vacancies.
-
-*   **Endpoint:** `GET /api/onef/vacancies`
-
-### 3.9 Get Vacancy Details
-*   **Endpoint:** `GET /api/onef/vacancies/{id}`
-
-### 3.10 List Candidate Test Attempts
-Retrieves all test invitations and results for a candidate.
-
-*   **Endpoint:** `GET /api/onef/candidates/{id}/attempts`
-*   **Response:**
-```json
-{
-  "items": [...],
-  "total": 2
-}
-```
-
-### 3.11 Get Detailed Attempt Results
-Fetch the full report of a specific test attempt (score, answers, etc.).
-
-*   **Endpoint:** `GET /api/onef/attempts/{id}`
-
-### 3.12 Trigger AI Analysis
-Manually trigger a fresh AI suitability analysis for a candidate.
-
-*   **Endpoint:** `POST /api/onef/candidates/{id}/analyze`
-*   **Response:** Returns the updated candidate object with new `ai_rating` and `ai_comment`.
-
-
-
+#### Global Unread Count
+*   **Endpoint:** `GET /messages/unread`
+*   **Response:** `{ "unread_count": 5 }`
 
 ---
 
-## 4. V1: Internal API (Legacy/Advanced)
+### 3.4 Tests & Invitations
 
-These endpoints mirror the internal dashboard functionality. Use them if you need raw data structures matching the Frontend.
+#### List Active Tests
+*   **Endpoint:** `GET /tests`
+*   **Description:** Lists all tests available for assignment.
 
-### 4.1 Dashboard Stats (Detailed)
-Returns raw hashmaps for charts.
-
-*   **Endpoint:** `GET /api/integration/dashboard/stats`
-*   **Response:**
-```json
-{
-  "total_candidates": 150,
-  "unread_messages": 5,
-  "active_tests": 10,
-  "active_vacancies": 12,
-  "candidates_by_status": {
-    "new": 10,
-    "accepted": 5,
-    "rejected": 2
-  },
-  "attempts_status": {
-    "pending": 5,
-    "completed": 20
-  },
-  "candidates_history": [
-    ["2024-02-01", 3],
-    ["2024-02-02", 5]
-  ]
-}
-```
-
-### 4.2 Sync Candidate Statuses
-Bulk fetch of all candidates and their current test statuses.
-
-*   **Endpoint:** `GET /api/integration/candidates/statuses`
-*   **Response:**
-```json
-[
-  {
-    "id": "uuid",
-    "external_id": "123456789",
-    "name": "John Doe",
-    "email": "john@example.com",
-    "status": "pending",
-    "last_updated": "2024-02-06T10:00:00Z"
-  }
-]
-```
-
-### 4.3 Send Message (Flexible)
-Allows sending by Telegram ID directly.
-
-*   **Endpoint:** `POST /api/integration/messages`
+#### Create Test Invitation
+*   **Endpoint:** `POST /invites`
 *   **Payload:**
 ```json
 {
-  "candidate_id": "uuid", 
-  // OR
-  "telegram_id": 123456789,
-  "text": "Message content"
+  "candidate_id": "uuid",
+  "test_id": "uuid",
+  "expires_in_hours": 48
 }
 ```
+*   **Response:** Details of the created invitation, including the `test_url`.
 
-### 4.4 Get Chat Messages (Raw)
-Returns raw database message objects.
+#### List All Attempts
+*   **Endpoint:** `GET /attempts`
+*   **Query Parameters:** `status`, `email`, `page`, `limit`
+*   **Description:** Filterable list of all test attempts.
 
-*   **Endpoint:** `GET /api/integration/messages/{candidate_id}`
+#### Get Candidate Attempts
+*   **Endpoint:** `GET /candidates/{id}/attempts`
+*   **Description:** Lists all test attempts for a specific candidate.
 
-### 4.5 Unread Count
-*   **Endpoint:** `GET /api/integration/messages/unread`
-*   **Response:** `{"unread_count": 5}`
+#### Get Detailed Attempt Result
+*   **Endpoint:** `GET /attempts/{id}`
+*   **Description:** Retrieves full results for a specific attempt, including answers.
+
+---
+
+### 3.5 Vacancies
+
+#### List Vacancies
+*   **Endpoint:** `GET /vacancies`
+*   **Description:** Lists all published vacancies.
+
+#### Get Vacancy Details
+*   **Endpoint:** `GET /vacancies/{id}`
+
+---
+
+### 3.6 Dictionaries
+
+#### Candidate Statuses
+*   **Endpoint:** `GET /dictionaries/candidate-statuses`
+*   **Response:** `[{ "id": "new", "label": "New" }, ...]`
+
+#### Test Statuses
+*   **Endpoint:** `GET /dictionaries/test-statuses`
+*   **Response:** `[{ "id": "pending", "label": "Pending (Invite Sent)" }, ...]`
+
+---
+
+## 4. Status Reference Table
+
+### Candidate Statuses
+- `new`: Just registered/applied.
+- `reviewing`: CV is being reviewed by HR.
+- `test_assigned`: Candidate has pending test invitations.
+- `test_completed`: Candidate finished all assigned tests.
+- `interview`: Candidate invited for an interview.
+- `accepted`: Candidate passed and is hired.
+- `rejected`: Candidate did not pass the selection process.
+
+### Test Attempt Statuses
+- `pending`: Invitation sent, link not yet accessed.
+- `in_progress`: Candidate has started the test.
+- `completed`: Test submitted, waiting for manual grading if needed.
+- `needs_review`: MCQ finished, but contains open questions requiring manual review.
+- `passed`: Score above threshold.
+- `failed`: Score below threshold.
+- `timeout`: Test closed automatically due to time limit.
+- `escaped`: Candidate left the test session (heartbeat lost).

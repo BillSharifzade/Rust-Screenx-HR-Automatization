@@ -45,6 +45,22 @@ impl CandidateService {
         Ok(candidate)
     }
 
+    pub async fn get_by_email(&self, email: &str) -> Result<Option<Candidate>> {
+        let candidate = sqlx::query_as!(
+            Candidate,
+            r#"
+            SELECT id, telegram_id, name, email, phone, cv_url, dob, vacancy_id, profile_data, ai_rating, ai_comment, status, created_at, updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.candidate_id = candidates.id AND m.read_at IS NULL AND m.direction = 'inbound') as unread_messages
+            FROM candidates 
+            WHERE email = $1
+            "#,
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(candidate)
+    }
+
     pub async fn create_candidate(
         &self,
         telegram_id: Option<i64>,

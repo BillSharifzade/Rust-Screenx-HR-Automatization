@@ -83,7 +83,6 @@ impl KoinotinavService {
             .await?;
         
         if response.status() == reqwest::StatusCode::OK {
-            // Check content type to avoid parsing HTML as JSON
             let content_type = response.headers()
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
@@ -103,7 +102,6 @@ impl KoinotinavService {
             tracing::warn!("Vacancy API returned status {}. Falling back to list scan.", response.status());
         }
 
-        // Fallback: search in the full list
         tracing::info!("Scanning full vacancy list for ID {}", id);
         let all_vacancies = self.fetch_vacancies().await?;
         Ok(all_vacancies.into_iter().find(|v| v.id == id))

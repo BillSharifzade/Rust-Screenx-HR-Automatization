@@ -149,8 +149,6 @@ Rules:
         vacancy_title: &str,
         vacancy_description: &str,
     ) -> Result<CandidateSuitability> {
-        // Check if text extraction was successful (more than 100 meaningful chars)
-        // We trim the potential [NOTE: ...] wrapper if it exists from previous logic
         let raw_text = cv_text.replace("[NOTE: The candidate's CV appears to be a scanned image. Extracted text is very sparse: '", "")
                              .replace("'. Please evaluate based on this and basic profile info.]", "");
         
@@ -160,7 +158,6 @@ Rules:
         if text_extraction_failed {
             if let Some(path) = cv_file_path {
                 tracing::info!("Triggering Vision API fallback for {}", path);
-                // Try vision-based analysis
                 match self.analyze_suitability_with_vision(
                     candidate_name,
                     candidate_email,
@@ -178,7 +175,6 @@ Rules:
             }
         }
 
-        // Hardened prompt for more realistic and critical evaluation
         let system_prompt = r#"You are a Critical and Unbiased Senior HR Specialist. 
         Your task is to strictly evaluate how well a candidate's CV matches a specific vacancy.
 
@@ -251,7 +247,6 @@ Rules:
             })
         ];
 
-        // Add up to 3 images (OpenAI limit considerations)
         for (i, image_base64) in images.iter().take(3).enumerate() {
             tracing::info!("Adding CV page {} to vision request", i + 1);
             content.push(serde_json::json!({
@@ -286,14 +281,13 @@ Rules:
         
         match ext.to_lowercase().as_str() {
             "pdf" => {
-                // Convert PDF pages to images using pdftoppm
                 let temp_dir = format!("/tmp/cv_images_{}", uuid::Uuid::new_v4());
                 fs::create_dir_all(&temp_dir).await?;
                 
                 let output = Command::new("pdftoppm")
                     .arg("-png")
                     .arg("-r")
-                    .arg("150") // 150 DPI for good quality
+                    .arg("150")
                     .arg(file_path)
                     .arg(format!("{}/page", temp_dir))
                     .output()
@@ -303,7 +297,6 @@ Rules:
                     Ok(out) => {
                         if !out.status.success() {
                             tracing::error!("pdftoppm failed: {}", String::from_utf8_lossy(&out.stderr));
-                            // Cleanup
                             let _ = fs::remove_dir_all(&temp_dir).await;
                             return Err(anyhow::anyhow!("PDF conversion failed").into());
                         }
@@ -315,7 +308,6 @@ Rules:
                     }
                 }
 
-                // Read generated images
                 let mut image_files = Vec::new();
                 let mut entries = fs::read_dir(&temp_dir).await?;
                 
@@ -326,7 +318,6 @@ Rules:
                     }
                 }
 
-                // Sort by filename numerically to maintain page order (page-1.png, page-10.png)
                 image_files.sort_by_key(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string());
 
                 let mut images = Vec::new();
@@ -337,13 +328,10 @@ Rules:
                     }
                 }
 
-                // Cleanup temp directory
                 let _ = fs::remove_dir_all(&temp_dir).await;
-
                 Ok(images)
             }
             "jpg" | "jpeg" | "png" | "webp" => {
-                // Direct image file
                 let data = fs::read(file_path).await?;
                 Ok(vec![BASE64.encode(&data)])
             }
@@ -433,11 +421,9 @@ Rules:
                 let mut correct = v.get("correct_answer").and_then(|i| i.as_i64()).unwrap_or(0) as i32;
                 let explanation = v.get("explanation").and_then(|s| s.as_str()).map(|s| s.to_string());
                 
-                // Shuffle options and track correct answer
                 if !options.is_empty() && correct >= 0 && (correct as usize) < options.len() {
                     let correct_option = options[correct as usize].clone();
                     options.shuffle(rng);
-                    // Find new position of correct answer
                     correct = options.iter().position(|o| o == &correct_option).unwrap_or(0) as i32;
                 }
                 

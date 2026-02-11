@@ -225,10 +225,15 @@ pub async fn register_candidate(
                 v_desc = v.content;
             }
 
+            let mut ai_rating = None;
+            let mut ai_comment = None;
+
             if !cv_text.is_empty() || !v_desc.is_empty() {
                 match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, c_cv.as_deref(), &v_name, &v_desc).await {
                     Ok(suitability) => {
-                        let _ = candidate_service.update_ai_suitability(candidate_id, suitability.rating, suitability.comment).await;
+                        let _ = candidate_service.update_ai_suitability(candidate_id, suitability.rating, suitability.comment.clone()).await;
+                        ai_rating = Some(suitability.rating);
+                        ai_comment = Some(suitability.comment);
                         tracing::info!("AI Suitability Analysis completed for candidate {}", candidate_id);
                     },
                     Err(e) => {
@@ -247,6 +252,8 @@ pub async fn register_candidate(
                 c_phone,
                 c_dob,
                 c_cv,
+                ai_rating,
+                ai_comment,
             ).await;
         });
     }
@@ -356,10 +363,15 @@ pub async fn apply_for_vacancy(
             v_desc = v.content;
         }
 
-        if !cv_text.is_empty() && !v_desc.is_empty() {
+        let mut ai_rating = None;
+        let mut ai_comment = None;
+
+        if !cv_text.is_empty() || !v_desc.is_empty() {
             match ai_service.analyze_suitability(&c_name, &c_email, &cv_text, c_cv.as_deref(), &v_name, &v_desc).await {
                 Ok(suitability) => {
-                    let _ = candidate_service.update_ai_suitability(c_id, suitability.rating, suitability.comment).await;
+                    let _ = candidate_service.update_ai_suitability(c_id, suitability.rating, suitability.comment.clone()).await;
+                    ai_rating = Some(suitability.rating);
+                    ai_comment = Some(suitability.comment);
                     tracing::info!("AI Suitability Analysis completed for candidate {} (re-application)", c_id);
                 },
                 Err(e) => {
@@ -378,6 +390,8 @@ pub async fn apply_for_vacancy(
             c_phone,
             c_dob,
             c_cv,
+            ai_rating,
+            ai_comment,
         ).await;
     });
 
@@ -574,7 +588,14 @@ pub async fn update_candidate_status(
         crate::error::Error::BadRequest("Status is required".into())
     })?.to_string();
 
-    let updated = state.candidate_service.update_status(id, status).await?;
+    let updated = state.candidate_service.update_status(id, status.clone()).await?;
+
+    // Push to OneF
+    let onef = state.onef_service.clone();
+    tokio::spawn(async move {
+        let _ = onef.notify_candidate_status(id, status).await;
+    });
+
     Ok(Json(updated))
 }
 

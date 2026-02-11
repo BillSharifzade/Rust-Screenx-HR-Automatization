@@ -574,8 +574,6 @@ pub async fn generate_test_spec(
     Ok((StatusCode::CREATED, Json(resp)))
 }
 
-// --- RESTORED ENDPOINTS ---
-
 #[axum::debug_handler]
 pub async fn send_message(
     State(state): State<AppState>,
@@ -617,7 +615,6 @@ pub async fn send_message(
         return Err(crate::error::Error::Internal(format!("Telegram API error: {}", err_text)));
     }
 
-    // Store the outgoing message
     let create_msg = crate::models::message::CreateMessage {
         candidate_id: candidate.id,
         telegram_id,
@@ -635,10 +632,7 @@ pub async fn get_chat_messages(
     Path(candidate_id): Path<Uuid>,
 ) -> Result<impl IntoResponse> {
     let messages = state.message_service.get_by_candidate(candidate_id).await?;
-    
-    // Mark inbound messages as read
     let _ = state.message_service.mark_as_read(candidate_id).await;
-    
     Ok(Json(messages))
 }
 
@@ -677,14 +671,9 @@ pub async fn sync_candidate_statuses(
 pub async fn get_dashboard_stats(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
-    // 1. Candidate Status Counts
     let candidates_status = state.candidate_service.get_status_counts().await?;
     let total_candidates: i64 = candidates_status.values().sum();
-
-    // 2. Unread Messages
     let unread_messages = state.message_service.total_unread_count().await?;
-
-    // 3. Active Tests
     let tests_list = state.test_service.list_tests(
         1, 
         1, 
@@ -695,15 +684,23 @@ pub async fn get_dashboard_stats(
         })
     ).await?;
     let active_tests = tests_list.total;
-
-    // 4. Active Vacancies (assuming all published vacancies are active)
-    let active_vacancies = match state.vacancy_service.list_published(1000).await {
+    let internal_active_vacancies = match state.vacancy_service.list_published(1000).await {
         Ok(v) => v.len() as i64,
         Err(e) => {
             tracing::error!("Failed to fetch vacancies for dashboard: {:?}", e);
             0
         }
     };
+
+    let external_vacancies = match state.koinotinav_service.fetch_vacancies().await {
+        Ok(v) => v.len() as i64,
+        Err(e) => {
+            tracing::error!("Failed to fetch external vacancies for dashboard: {:?}", e);
+            0
+        }
+    };
+
+    let total_active_vacancies = internal_active_vacancies + external_vacancies;
 
     let candidates_history = state.candidate_service.get_history_counts().await?;
     let attempts_status = state.attempt_service.get_status_distribution().await?;
@@ -712,7 +709,7 @@ pub async fn get_dashboard_stats(
         total_candidates,
         unread_messages,
         active_tests,
-        active_vacancies,
+        active_vacancies: total_active_vacancies,
         candidates_by_status: candidates_status,
         candidates_history,
         attempts_status,

@@ -363,12 +363,20 @@ async fn main() -> anyhow::Result<()> {
             get(routes::onef::get_vacancy),
         )
         .route(
+            "/api/onef/candidates",
+            get(routes::onef::list_candidates),
+        )
+        .route(
             "/api/onef/candidates/:id",
             get(routes::onef::get_candidate),
         )
         .route(
             "/api/onef/candidates/:id/attempts",
             get(routes::onef::get_candidate_attempts),
+        )
+        .route(
+            "/api/onef/attempts",
+            get(routes::onef::list_all_attempts),
         )
         .route(
             "/api/onef/attempts/:id",
@@ -381,6 +389,22 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/onef/candidates/:id/analyze",
             post(routes::candidate_routes::analyze_candidate_suitability),
+        )
+        .route(
+            "/api/onef/tests",
+            get(routes::onef::list_tests),
+        )
+        .route(
+            "/api/onef/invites",
+            post(routes::onef::create_test_invite),
+        )
+        .route(
+            "/api/onef/dictionaries/candidate-statuses",
+            get(routes::onef::list_candidate_statuses),
+        )
+        .route(
+            "/api/onef/dictionaries/test-statuses",
+            get(routes::onef::list_test_statuses),
         )
         .layer(axum::middleware::from_fn_with_state(
             recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),

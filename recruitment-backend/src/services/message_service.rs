@@ -13,7 +13,6 @@ impl MessageService {
         Self { pool }
     }
 
-    /// Save a new message (inbound or outbound)
     pub async fn create(&self, msg: CreateMessage) -> Result<Message> {
         let message = sqlx::query_as::<_, Message>(
             r#"
@@ -32,7 +31,6 @@ impl MessageService {
         Ok(message)
     }
 
-    /// Get all messages for a candidate, ordered by time
     pub async fn get_by_candidate(&self, candidate_id: Uuid) -> Result<Vec<Message>> {
         let messages = sqlx::query_as::<_, Message>(
             r#"
@@ -48,7 +46,6 @@ impl MessageService {
         Ok(messages)
     }
 
-    /// Mark all unread inbound messages as read for a candidate
     pub async fn mark_as_read(&self, candidate_id: Uuid) -> Result<u64> {
         let result = sqlx::query(
             r#"
@@ -64,7 +61,6 @@ impl MessageService {
         Ok(result.rows_affected())
     }
 
-    /// Get count of unread messages for a candidate
     pub async fn unread_count(&self, candidate_id: Uuid) -> Result<i64> {
         let count: (i64,) = sqlx::query_as(
             r#"
@@ -79,7 +75,6 @@ impl MessageService {
         Ok(count.0)
     }
 
-    /// Get total unread count across all candidates (for admin dashboard)
     pub async fn total_unread_count(&self) -> Result<i64> {
         let count: (i64,) = sqlx::query_as(
             r#"

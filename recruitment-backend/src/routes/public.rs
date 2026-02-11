@@ -87,11 +87,37 @@ pub async fn start_test(
              tracing::info!("Test started successfully: {:?}", updated.id);
              let response = StartTestResponse {
                 attempt_id: updated.id,
-                status: updated.status,
+                status: updated.status.clone(),
                 started_at: updated.started_at.unwrap_or(Utc::now()),
                 expires_at: updated.expires_at,
                 questions: updated.questions_snapshot,
             };
+
+            // Notify OneF
+            let onef = state.onef_service.clone();
+            let cand_svc = state.candidate_service.clone();
+            let attempt_id = updated.id;
+            let test_id = updated.test_id;
+            let status = updated.status.clone();
+            let email = updated.candidate_email.clone();
+
+            tokio::spawn(async move {
+                if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                    let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
+                        event_type: "test_status_changed".to_string(),
+                        attempt_id,
+                        candidate_id: candidate.id,
+                        test_id,
+                        status,
+                        score: None,
+                        max_score: None,
+                        percentage: None,
+                        passed: None,
+                        updated_at: Utc::now().to_rfc3339(),
+                    }).await;
+                }
+            });
+
             Ok(Json(response).into_response())
         },
         Err(e) => {
@@ -319,6 +345,34 @@ pub async fn submit_test(
             if let Err(e) = notif.enqueue_webhook("test_completed", &payload_json).await {
                 tracing::error!("Failed to enqueue webhook: {:?}", e);
             }
+
+            // Notify OneF
+            let onef = state.onef_service.clone();
+            let cand_svc = state.candidate_service.clone();
+            let attempt_id = attempt.id;
+            let test_id = attempt.test_id;
+            let status = attempt.status.clone();
+            let email = attempt.candidate_email.clone();
+            let score_f = score as f64;
+            let max_score_f = max_score as f64;
+            let pct_f = percentage as f64;
+
+            tokio::spawn(async move {
+                if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                    let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
+                        event_type: "test_status_changed".to_string(),
+                        attempt_id,
+                        candidate_id: candidate.id,
+                        test_id,
+                        status,
+                        score: Some(score_f),
+                        max_score: Some(max_score_f),
+                        percentage: Some(pct_f),
+                        passed: Some(passed),
+                        updated_at: Utc::now().to_rfc3339(),
+                    }).await;
+                }
+            });
         },
         Err(e) => {
             tracing::error!("Failed to fetch test for notification: {:?}", e);

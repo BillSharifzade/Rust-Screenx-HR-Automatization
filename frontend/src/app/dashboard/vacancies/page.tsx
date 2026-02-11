@@ -44,7 +44,7 @@ export default function VacanciesPage() {
         }
         return map;
     }, [data]);
-
+``
     const loadingSkeleton = (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (

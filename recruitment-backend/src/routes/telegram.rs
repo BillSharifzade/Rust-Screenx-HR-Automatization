@@ -41,9 +41,7 @@ pub async fn handle_webhook(
             let user_id = message.from.id;
             let chat_id = message.chat.id;
             
-            // Try to find the candidate by telegram_id to store their message
             if let Ok(Some(candidate)) = state.candidate_service.get_by_telegram_id(user_id).await {
-                // Store incoming message
                 let create_msg = crate::models::message::CreateMessage {
                     candidate_id: candidate.id,
                     telegram_id: user_id,
@@ -54,7 +52,6 @@ pub async fn handle_webhook(
                     tracing::warn!("Failed to store incoming message: {:?}", e);
                 }
                 
-                // NEW: Notify 1F about new message (Fire-and-Forget)
                 let onef = state.onef_service.clone();
                 let cid = candidate.id;
                 let t_text = text.clone();
@@ -65,7 +62,6 @@ pub async fn handle_webhook(
                 });
             }
             
-            // Handle /start command
             if text.starts_with("/start") || text.starts_with("/strat") {
                 tracing::info!("Handling /start from user: {} (id: {})", message.from.first_name, user_id);
                 
