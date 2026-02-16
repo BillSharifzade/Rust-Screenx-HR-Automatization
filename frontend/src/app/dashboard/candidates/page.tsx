@@ -10,7 +10,7 @@ import {
     Search, User, Mail, Phone, Calendar, Briefcase, FileText,
     Download, Sparkles, Binary, Loader2, LayoutGrid,
     List, History, CheckCircle2, Clock, XCircle, Send, MessageSquare,
-    AlertCircle, Cake, ChevronDown
+    AlertCircle, Cake, ChevronDown, Trash2
 } from "lucide-react"
 import { format } from "date-fns"
 import Link from "next/link"
@@ -28,9 +28,20 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { CandidateApplication, ExternalVacancyListResponse } from "@/types/api"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, deleteCandidate } from "@/lib/api"
 import { useTranslation } from "@/lib/i18n-context"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -232,6 +243,17 @@ function CandidatesPageContent() {
         }
     };
 
+    const handleDeleteCandidate = async (candidateId: string) => {
+        try {
+            await deleteCandidate(candidateId);
+            toast.success(t('candidate_profile.deleted_success') || "Candidate deleted successfully");
+            queryClient.invalidateQueries({ queryKey: ["candidates"] });
+        } catch (e) {
+            console.error(e);
+            toast.error(t('candidate_profile.delete_error') || "Failed to delete candidate");
+        }
+    };
+
     const AiAssessmentDialog = ({ candidate, trigger }: { candidate: any, trigger: React.ReactNode }) => (
         <Dialog>
             <DialogTrigger asChild>
@@ -301,6 +323,31 @@ function CandidatesPageContent() {
                 </div>
             </DialogContent>
         </Dialog>
+    );
+
+    const DeleteCandidateDialog = ({ candidate, trigger }: { candidate: any, trigger: React.ReactNode }) => (
+        <AlertDialog>
+            <AlertDialogTrigger asChild>
+                {trigger}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>{t('candidate_profile.delete_confirm_title') || "Are you absolutely sure?"}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        {t('candidate_profile.delete_confirm_desc') || `This will permanently delete ${candidate.name} and all associated data. This action cannot be undone.`}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel') || "Cancel"}</AlertDialogCancel>
+                    <AlertDialogAction
+                        onClick={() => handleDeleteCandidate(candidate.id)}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                        {t('common.delete') || "Delete"}
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
     );
 
     const { data: candidates, isLoading } = useQuery({
@@ -546,6 +593,14 @@ function CandidatesPageContent() {
                                                         </Button>
                                                     }
                                                 />
+                                                <DeleteCandidateDialog
+                                                    candidate={candidate}
+                                                    trigger={
+                                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-destructive/10 group/delete">
+                                                            <Trash2 className="h-4 w-4 text-muted-foreground group-hover/delete:text-destructive transition-colors" />
+                                                        </Button>
+                                                    }
+                                                />
                                             </div>
                                         </CardHeader>
                                         <CardContent className="pt-4 space-y-4 flex-1">
@@ -731,6 +786,14 @@ function CandidatesPageContent() {
                                                                 if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
                                                             }}>
                                                                 <Sparkles className={cn("h-3.5 w-3.5 text-primary transition-colors", isAnalyzingId === candidate.id && "animate-pulse")} />
+                                                            </Button>
+                                                        }
+                                                    />
+                                                    <DeleteCandidateDialog
+                                                        candidate={candidate}
+                                                        trigger={
+                                                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-destructive/10 group/delete shadow-sm" title={t('common.delete')}>
+                                                                <Trash2 className="h-3.5 w-3.5 text-muted-foreground group-hover/delete:text-destructive transition-colors" />
                                                             </Button>
                                                         }
                                                     />

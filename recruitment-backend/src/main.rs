@@ -209,6 +209,10 @@ async fn main() -> anyhow::Result<()> {
             get(routes::integration::list_candidates),
         )
         .route(
+            "/api/integration/candidates/:id",
+            axum::routing::delete(routes::candidate_routes::delete_candidate),
+        )
+        .route(
             "/api/integration/candidates/:id/status",
             post(routes::candidate_routes::update_candidate_status),
         )

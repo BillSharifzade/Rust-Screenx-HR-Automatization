@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+// Use 'http://127.0.0.1:8000' for local dev (backend runs on 8000), or the env var for Docker
+const backendUrl = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+console.log('Using Backend URL for Rewrites:', backendUrl);
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -11,6 +13,10 @@ const nextConfig: NextConfig = {
       {
         source: '/uploads/:path*',
         destination: `${backendUrl}/uploads/:path*`,
+      },
+      {
+        source: '/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
       },
     ];
   },

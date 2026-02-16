@@ -71,3 +71,8 @@ export async function apiFetch<T>(endpoint: string, options: FetchOptions = {}):
         return {} as T;
     }
 }
+export async function deleteCandidate(id: string): Promise<void> {
+    await apiFetch(`/api/integration/candidates/${id}`, {
+        method: 'DELETE',
+    });
+}

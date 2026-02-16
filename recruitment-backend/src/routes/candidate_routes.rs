@@ -623,3 +623,14 @@ pub async fn share_candidate_grade_to_onef(
         "grade": grade
     })))
 }
+
+pub async fn delete_candidate(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<impl axum::response::IntoResponse> {
+    state.candidate_service.delete_candidate(id).await.map_err(|e| {
+        tracing::error!("Failed to delete candidate {}: {}", id, e);
+        crate::error::Error::Internal(e.to_string())
+    })?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}

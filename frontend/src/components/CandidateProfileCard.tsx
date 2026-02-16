@@ -10,10 +10,21 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { ExternalVacancyListResponse, CandidateApplication } from "@/types/api"
-import { apiFetch } from "@/lib/api"
-import { Briefcase } from "lucide-react"
+import { apiFetch, deleteCandidate } from "@/lib/api"
+import { Briefcase, Trash2 } from "lucide-react"
 import { useTranslation } from "@/lib/i18n-context"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -39,6 +50,20 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
     const fileInputRef = useRef<HTMLInputElement>(null)
     const router = useRouter()
     const queryClient = useQueryClient()
+    const [isDeleting, setIsDeleting] = useState(false)
+
+    const handleDelete = async () => {
+        setIsDeleting(true)
+        try {
+            await deleteCandidate(candidate.id)
+            toast.success(t('candidate_profile.deleted_success') || "Candidate deleted successfully")
+            router.push('/dashboard/candidates')
+        } catch (error) {
+            console.error(error)
+            toast.error(t('candidate_profile.delete_error') || "Failed to delete candidate")
+            setIsDeleting(false)
+        }
+    }
 
     // Fetch vacancies to resolve titles
     const { data: vacancyData } = useQuery({
@@ -70,7 +95,7 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
         queryKey: ['candidate-history', candidate.id],
         queryFn: () => apiFetch<HistoryItem[]>(`/api/candidate/${candidate.id}/history`),
         enabled: !!candidate.id,
-        refetchInterval: 30000, // Refresh every 30 seconds
+        refetchInterval: 30000,
     });
 
     const getHistoryIcon = (eventType: string, status: string | null) => {
@@ -564,6 +589,33 @@ export function CandidateProfileCard({ candidate, onCvUpdated, isPublicView = fa
                             </p>
                         )}
                     </div>
+
+                    {!isPublicView && (
+                        <div className="pt-4 border-t mt-4">
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" className="w-full gap-2" disabled={isDeleting}>
+                                        {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                        {t('candidate_profile.delete_btn') || "Delete Candidate"}
+                                    </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>{t('candidate_profile.delete_confirm_title') || "Are you absolutely sure?"}</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            {t('candidate_profile.delete_confirm_desc') || "This action cannot be undone. This will permanently delete the candidate and all associated data including test attempts and messages."}
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>{t('common.cancel') || "Cancel"}</AlertDialogCancel>
+                                        <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                            {t('common.delete') || "Delete"}
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>
