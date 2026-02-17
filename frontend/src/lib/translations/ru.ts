@@ -34,6 +34,7 @@ export const ru = {
         unit_h: "ч",
         unit_m: "м",
         unit_s: "с",
+        amount: "Количество",
     },
     registration: {
         title: "Регистрация кандидата",
@@ -144,6 +145,11 @@ export const ru = {
         ai_suitability_title: "Результат пригодности",
         ai_success: "ИИ анализ обновлен",
         ai_error: "Не удалось провести ИИ анализ",
+        delete_confirm_title: "Вы абсолютно уверены?",
+        delete_confirm_desc: "Это действие отменить нельзя. Кандидат и все связанные данные (включая попытки тестов и сообщения) будут безвозвратно удалены.",
+        delete_btn: "Удалить кандидата",
+        deleted_success: "Кандидат успешно удален",
+        delete_error: "Не удалось удалить кандидата",
     },
     dashboard: {
         invites: {

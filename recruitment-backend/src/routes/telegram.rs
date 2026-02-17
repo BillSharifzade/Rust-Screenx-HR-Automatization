@@ -62,7 +62,7 @@ pub async fn handle_webhook(
                 });
             }
             
-            if text.starts_with("/start") || text.starts_with("/strat") {
+            if text.starts_with("/start") {
                 tracing::info!("Handling /start from user: {} (id: {})", message.from.first_name, user_id);
                 
                 let candidate = state.candidate_service.get_by_telegram_id(user_id).await?;
@@ -78,8 +78,8 @@ pub async fn handle_webhook(
                 
                 let (msg_text, button_text, web_app_url) = if let Some(c) = candidate {
                     (
-                        "Welcome back! You can view your profile here:", 
-                        "View Profile", 
+                        "С возвращением! Вы можете просмотреть свой профиль здесь:", 
+                        "Просмотреть профиль", 
                         format!("{}/candidate/{}", webapp_url, c.id)
                     )
                 } else {
@@ -95,8 +95,8 @@ pub async fn handle_webhook(
                     params.push(format!("telegram_id={}", user_id));
                     
                     (
-                        "Hello! To join our recruitment process, please register your profile:", 
-                        "Register Profile", 
+                        "Здравствуйте! Чтобы присоединиться к нашему процессу найма, пожалуйста, зарегистрируйте свой профиль:", 
+                        "Зарегистрировать профиль", 
                         format!("{}{}", register_url, params.join("&"))
                     )
                 };
@@ -112,7 +112,8 @@ pub async fn handle_webhook(
 
                 send_telegram_message(chat_id, msg_text, Some(reply_markup)).await?;
             } else {
-                 tracing::debug!("Received message from user {}: {}", user_id, text);
+                 let help_text = "Чтобы начать работу или открыть свой профиль, пожалуйста, используйте команду /start";
+                 let _ = send_telegram_message(chat_id, help_text, None).await;
             }
         }
     }

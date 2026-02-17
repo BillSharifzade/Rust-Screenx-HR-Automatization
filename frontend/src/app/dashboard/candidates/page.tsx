@@ -538,7 +538,7 @@ function CandidatesPageContent() {
                             )}
                         >
                             <Card className={cn(
-                                "border border-transparent bg-card/40 backdrop-blur-md shadow-sm h-full transition-all duration-300 premium-hover group",
+                                "border-0 shadow-none rounded-none bg-card/40 backdrop-blur-md h-full transition-all duration-300 group",
                                 layout === 'list' ? "p-2" : "p-0"
                             )}>
                                 {layout === 'grid' ? (

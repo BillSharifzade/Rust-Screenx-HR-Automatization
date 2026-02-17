@@ -12,6 +12,9 @@ import {
   PieChart, Pie, Legend, AreaChart, Area
 } from 'recharts';
 
+import { format } from "date-fns";
+import { ru as localeRu, enUS as localeEn } from "date-fns/locale";
+
 interface DashboardStats {
   total_candidates: number;
   unread_messages: number;
@@ -23,7 +26,8 @@ interface DashboardStats {
 }
 
 export default function DashboardPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const dateLocale = language === 'ru' ? localeRu : localeEn;
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
@@ -42,7 +46,7 @@ export default function DashboardPage() {
   // 2. Applications History (Area Chart)
   // Convert tuple array to object array
   const historyData = stats?.candidates_history?.map(([date, count]) => ({
-    date: date.split('-').slice(1).join('/'), // MM/DD
+    date: format(new Date(date), "dd/MM", { locale: dateLocale }),
     count
   })) || [];
 
@@ -156,7 +160,7 @@ export default function DashboardPage() {
                   contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '0.5rem' }}
                   itemStyle={{ color: 'hsl(var(--foreground))' }}
                 />
-                <Area type="monotone" dataKey="count" stroke="#8884d8" fillOpacity={1} fill="url(#colorCount)" />
+                <Area type="monotone" dataKey="count" name={t('common.amount')} stroke="#8884d8" fillOpacity={1} fill="url(#colorCount)" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -228,7 +232,7 @@ export default function DashboardPage() {
                   }}
                   itemStyle={{ color: 'hsl(var(--foreground))' }}
                 />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                <Bar dataKey="value" name={t('common.amount')} radius={[4, 4, 0, 0]}>
                   {statusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}

@@ -34,7 +34,7 @@ async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
         .map(|e| e.to_lowercase())
         .unwrap_or_else(|| "bin".to_string());
 
-    let allowed_exts = ["pdf", "doc", "docx", "txt", "rtf", "jpg", "jpeg", "png", "webp"];
+    let allowed_exts = ["pdf", "doc", "docx", "txt", "rtf", "odt", "jpg", "jpeg", "png", "webp"];
     if !allowed_exts.contains(&ext.as_str()) {
         return Err(crate::error::Error::BadRequest(format!("File type .{} is not allowed", ext)));
     }
@@ -100,8 +100,69 @@ async fn extract_text_from_file(file_path: &str) -> String {
                 }
             }
         }
+        "doc" | "docx" | "rtf" | "odt" => {
+            extract_text_via_libreoffice(file_path).await
+        }
         _ => String::new(),
     }
+}
+
+/// Convert DOC/DOCX/RTF/ODT to plain text using LibreOffice in headless mode.
+async fn extract_text_via_libreoffice(file_path: &str) -> String {
+    let temp_dir = format!("/tmp/cv_convert_{}", uuid::Uuid::new_v4());
+    if let Err(e) = fs::create_dir_all(&temp_dir).await {
+        tracing::error!("Failed to create temp dir for conversion: {}", e);
+        return String::new();
+    }
+
+    let output = tokio::process::Command::new("libreoffice")
+        .arg("--headless")
+        .arg("--norestore")
+        .arg("--convert-to")
+        .arg("txt:Text")
+        .arg("--outdir")
+        .arg(&temp_dir)
+        .arg(file_path)
+        .output()
+        .await;
+
+    let result = match output {
+        Ok(out) => {
+            if !out.status.success() {
+                tracing::error!(
+                    "LibreOffice conversion failed for {}: {}",
+                    file_path,
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                String::new()
+            } else {
+                // Find the generated .txt file in temp_dir
+                let mut text = String::new();
+                if let Ok(mut entries) = fs::read_dir(&temp_dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let p = entry.path();
+                        if p.extension().and_then(|e| e.to_str()) == Some("txt") {
+                            if let Ok(content) = fs::read_to_string(&p).await {
+                                text = content;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if text.is_empty() {
+                    tracing::warn!("LibreOffice produced no txt output for {}", file_path);
+                }
+                text
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to run libreoffice for {}: {}", file_path, e);
+            String::new()
+        }
+    };
+
+    let _ = fs::remove_dir_all(&temp_dir).await;
+    result
 }
 
 pub async fn register_candidate(

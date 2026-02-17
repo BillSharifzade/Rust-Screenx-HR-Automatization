@@ -281,64 +281,121 @@ Rules:
         
         match ext.to_lowercase().as_str() {
             "pdf" => {
-                let temp_dir = format!("/tmp/cv_images_{}", uuid::Uuid::new_v4());
+                self.pdf_to_images(file_path).await
+            }
+            "jpg" | "jpeg" | "png" | "webp" => {
+                let data = fs::read(file_path).await?;
+                Ok(vec![BASE64.encode(&data)])
+            }
+            "doc" | "docx" | "rtf" | "odt" => {
+                // Convert to PDF first via LibreOffice, then extract images from the PDF
+                let temp_dir = format!("/tmp/cv_topdf_{}", uuid::Uuid::new_v4());
                 fs::create_dir_all(&temp_dir).await?;
-                
-                let output = Command::new("pdftoppm")
-                    .arg("-png")
-                    .arg("-r")
-                    .arg("150")
+
+                let output = Command::new("libreoffice")
+                    .arg("--headless")
+                    .arg("--norestore")
+                    .arg("--convert-to")
+                    .arg("pdf")
+                    .arg("--outdir")
+                    .arg(&temp_dir)
                     .arg(file_path)
-                    .arg(format!("{}/page", temp_dir))
                     .output()
                     .await;
 
                 match output {
                     Ok(out) => {
                         if !out.status.success() {
-                            tracing::error!("pdftoppm failed: {}", String::from_utf8_lossy(&out.stderr));
                             let _ = fs::remove_dir_all(&temp_dir).await;
-                            return Err(anyhow::anyhow!("PDF conversion failed").into());
+                            return Err(anyhow::anyhow!(
+                                "LibreOffice PDF conversion failed: {}",
+                                String::from_utf8_lossy(&out.stderr)
+                            ).into());
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Failed to run pdftoppm: {}", e);
                         let _ = fs::remove_dir_all(&temp_dir).await;
-                        return Err(anyhow::anyhow!("pdftoppm not available").into());
+                        return Err(anyhow::anyhow!("Failed to run libreoffice: {}", e).into());
                     }
                 }
 
-                let mut image_files = Vec::new();
+                // Find the generated PDF
+                let mut pdf_path = None;
                 let mut entries = fs::read_dir(&temp_dir).await?;
-                
                 while let Some(entry) = entries.next_entry().await? {
-                    let entry_path = entry.path();
-                    if entry_path.extension().and_then(|e| e.to_str()) == Some("png") {
-                        image_files.push(entry_path);
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("pdf") {
+                        pdf_path = Some(p);
+                        break;
                     }
                 }
 
-                image_files.sort_by_key(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string());
-
-                let mut images = Vec::new();
-                for img_path in image_files {
-                    if let Ok(data) = fs::read(&img_path).await {
-                        tracing::info!("Adding image to vision processing: {:?}", img_path);
-                        images.push(BASE64.encode(&data));
-                    }
-                }
+                let result = if let Some(pdf) = pdf_path {
+                    self.pdf_to_images(pdf.to_str().unwrap_or("")).await
+                } else {
+                    Err(anyhow::anyhow!("LibreOffice produced no PDF output").into())
+                };
 
                 let _ = fs::remove_dir_all(&temp_dir).await;
-                Ok(images)
-            }
-            "jpg" | "jpeg" | "png" | "webp" => {
-                let data = fs::read(file_path).await?;
-                Ok(vec![BASE64.encode(&data)])
+                result
             }
             _ => {
                 Err(anyhow::anyhow!("Unsupported file format for vision: {}", ext).into())
             }
         }
+    }
+
+    /// Convert a PDF file to base64-encoded PNG images (one per page, max 3).
+    async fn pdf_to_images(&self, pdf_path: &str) -> Result<Vec<String>> {
+        let temp_dir = format!("/tmp/cv_images_{}", uuid::Uuid::new_v4());
+        fs::create_dir_all(&temp_dir).await?;
+
+        let output = Command::new("pdftoppm")
+            .arg("-png")
+            .arg("-r")
+            .arg("150")
+            .arg(pdf_path)
+            .arg(format!("{}/page", temp_dir))
+            .output()
+            .await;
+
+        match output {
+            Ok(out) => {
+                if !out.status.success() {
+                    tracing::error!("pdftoppm failed: {}", String::from_utf8_lossy(&out.stderr));
+                    let _ = fs::remove_dir_all(&temp_dir).await;
+                    return Err(anyhow::anyhow!("PDF conversion failed").into());
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to run pdftoppm: {}", e);
+                let _ = fs::remove_dir_all(&temp_dir).await;
+                return Err(anyhow::anyhow!("pdftoppm not available").into());
+            }
+        }
+
+        let mut image_files = Vec::new();
+        let mut entries = fs::read_dir(&temp_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            if entry_path.extension().and_then(|e| e.to_str()) == Some("png") {
+                image_files.push(entry_path);
+            }
+        }
+
+        image_files.sort_by_key(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string());
+
+        let mut images = Vec::new();
+        for img_path in image_files {
+            if let Ok(data) = fs::read(&img_path).await {
+                tracing::info!("Adding image to vision processing: {:?}", img_path);
+                images.push(BASE64.encode(&data));
+            }
+        }
+
+        let _ = fs::remove_dir_all(&temp_dir).await;
+        Ok(images)
     }
 
     async fn chat_openai(&self, payload: JsonValue) -> Result<JsonValue> {

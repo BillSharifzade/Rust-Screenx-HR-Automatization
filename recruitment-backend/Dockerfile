@@ -43,6 +43,8 @@ RUN apt-get update \
         libgbm1 \
         libasound2 \
         libpangocairo-1.0-0 \
+        poppler-utils \
+        libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --no-cache-dir --break-system-packages selenium

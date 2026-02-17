@@ -34,6 +34,7 @@ export const en = {
         unit_h: "h",
         unit_m: "m",
         unit_s: "s",
+        amount: "Amount",
     },
     registration: {
         title: "Candidate Registration",
@@ -144,6 +145,11 @@ export const en = {
         ai_suitability_title: "Suitability Result",
         ai_success: "AI Analysis updated",
         ai_error: "Failed to run AI analysis",
+        delete_confirm_title: "Are you absolutely sure?",
+        delete_confirm_desc: "This action cannot be undone. This will permanently delete the candidate and all associated data including test attempts and messages.",
+        delete_btn: "Delete Candidate",
+        deleted_success: "Candidate deleted successfully",
+        delete_error: "Failed to delete candidate",
     },
     dashboard: {
         invites: {
