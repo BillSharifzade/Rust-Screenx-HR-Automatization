@@ -506,8 +506,8 @@ function CandidatesPageContent() {
                         {t('dashboard.candidates.subtitle')}
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg border shadow-sm">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg border shadow-sm shrink-0">
                         <Button
                             variant={layout === 'grid' ? 'secondary' : 'ghost'}
                             size="sm"
@@ -527,18 +527,18 @@ function CandidatesPageContent() {
                             <span className="text-xs font-medium hidden sm:inline">{t('common.layout_list')}</span>
                         </Button>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <div className="relative w-64">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                        <div className="relative flex-1 min-w-[200px] sm:w-64 sm:flex-none">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
                                 placeholder={t('dashboard.candidates.search_placeholder')}
-                                className="pl-8 bg-muted/30 focus:bg-background transition-colors"
+                                className="pl-8 bg-muted/30 focus:bg-background transition-colors w-full"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
                         </div>
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[160px] bg-muted/30 transition-colors">
+                            <SelectTrigger className="flex-1 min-w-[140px] sm:w-[160px] sm:flex-none bg-muted/30 transition-colors">
                                 <SelectValue placeholder={t('common.filter') || "Filter"} />
                             </SelectTrigger>
                             <SelectContent>
@@ -552,7 +552,7 @@ function CandidatesPageContent() {
                         </Select>
 
                         <Select value={vacancyFilter} onValueChange={setVacancyFilter}>
-                            <SelectTrigger className="w-[220px] bg-muted/30 transition-colors">
+                            <SelectTrigger className="flex-1 min-w-[140px] sm:w-[220px] sm:flex-none bg-muted/30 transition-colors">
                                 <SelectValue placeholder={t('common.vacancy') || "Vacancy"} />
                             </SelectTrigger>
                             <SelectContent className="max-w-[400px]">
@@ -569,7 +569,7 @@ function CandidatesPageContent() {
                         <Button
                             variant="outline"
                             size="sm"
-                            className="h-9 gap-2 border-emerald-500/20 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-500/40 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                            className="h-9 gap-2 border-emerald-500/20 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-500/40 dark:text-emerald-400 dark:hover:bg-emerald-950/30 shrink-0"
                             onClick={() => {
                                 setSelectedExportIds(new Set());
                                 setShowExportDialog(true);
@@ -585,7 +585,7 @@ function CandidatesPageContent() {
 
             <div className={cn(
                 "grid gap-4 transition-all duration-300",
-                layout === 'grid' ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "grid-cols-1"
+                layout === 'grid' ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" : "grid-cols-1"
             )}>
                 <AnimatePresence initial={false}>
                     {filteredCandidates?.map((candidate: any) => (
@@ -621,8 +621,8 @@ function CandidatesPageContent() {
                             )}>
                                 {layout === 'grid' ? (
                                     <div className="flex flex-col h-full">
-                                        <CardHeader className="pb-3 bg-muted/30 relative h-[72px] flex flex-row items-center border-b border-primary/5">
-                                            <div className="flex items-center gap-3 pr-28 min-w-0 flex-1">
+                                        <CardHeader className="pb-3 bg-muted/30 relative min-h-[72px] flex flex-col sm:flex-row sm:items-center border-b border-primary/5 p-4 sm:p-5">
+                                            <div className="flex items-center gap-3 pr-0 sm:pr-32 min-w-0 flex-1 mb-3 sm:mb-0">
                                                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
                                                     <User className="h-6 w-6 text-primary" />
                                                 </div>
@@ -631,7 +631,7 @@ function CandidatesPageContent() {
                                                 </div>
                                             </div>
 
-                                            <div className="absolute top-1/2 -translate-y-1/2 right-3 flex items-center gap-0.5 bg-background/50 backdrop-blur-md p-0.5 rounded-lg border border-primary/10 shadow-sm transition-all hover:bg-background/80">
+                                            <div className="sm:absolute sm:top-1/2 sm:-translate-y-1/2 sm:right-3 flex items-center gap-1 bg-background/50 backdrop-blur-md p-1 rounded-lg border border-primary/10 shadow-sm transition-all hover:bg-background/80 self-start sm:self-auto ml-10 sm:ml-0">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-primary/10">
@@ -764,7 +764,7 @@ function CandidatesPageContent() {
                                 ) : (
                                     <div className="flex flex-col lg:flex-row items-center gap-4 p-4 w-full">
                                         {/* Name Section - Fixed Width */}
-                                        <div className="flex items-center gap-4 w-full lg:w-[240px] shrink-0 relative group/header">
+                                        <div className="flex items-center gap-4 w-full lg:w-[260px] shrink-0 relative group/header p-1 lg:p-0">
                                             <div className="h-11 w-11 rounded-full bg-primary/10 flex items-center justify-center shrink-0 shadow-inner border border-primary/5">
                                                 <User className="h-6 w-6 text-primary" />
                                             </div>
@@ -780,7 +780,7 @@ function CandidatesPageContent() {
                                             </div>
 
                                             {/* Quick Actions for Name Section */}
-                                            <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm p-0.5 rounded-md border border-primary/10">
+                                            <div className="absolute top-1 right-1 lg:top-0 lg:right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm p-0.5 rounded-md border border-primary/10">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
@@ -803,7 +803,7 @@ function CandidatesPageContent() {
                                         </div>
 
                                         {/* info Grid - Standardized Columns */}
-                                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 flex-1 w-full lg:border-l px-0 lg:px-6 border-muted-foreground/10 py-1">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 flex-1 w-full lg:border-l px-0 lg:px-6 border-muted-foreground/10 py-1">
                                             <div className="flex flex-col space-y-1">
                                                 <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest font-bold">Status</span>
                                                 <div className="h-6 flex items-center">
@@ -843,8 +843,8 @@ function CandidatesPageContent() {
                                         </div>
 
                                         {/* Actions Section - Standardized spacing */}
-                                        <div className="flex items-center gap-3 w-full lg:w-auto shrink-0 lg:border-l pl-0 lg:pl-6 border-muted-foreground/10">
-                                            <div className="flex items-center gap-2 w-full lg:w-auto">
+                                        <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto shrink-0 lg:border-l pl-0 lg:pl-6 border-muted-foreground/10 py-2 lg:py-0">
+                                            <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
                                                 {/* Tool Buttons */}
                                                 <div className="flex items-center gap-1.5 bg-muted/30 p-1 rounded-lg border border-primary/5">
                                                     {candidate.cv_url ? (
@@ -885,8 +885,8 @@ function CandidatesPageContent() {
                                                 </div>
 
                                                 {/* Text Buttons */}
-                                                <div className="flex items-center gap-2 ml-1">
-                                                    <Button variant="outline" size="sm" className="h-9 gap-2 text-[11px] font-semibold border-primary/10 hover:bg-primary/5 hover:border-primary/20 hidden xl:flex relative" onClick={() => {
+                                                <div className="flex flex-wrap items-center gap-2 w-full justify-center sm:justify-start">
+                                                    <Button variant="outline" size="sm" className="h-9 gap-2 text-[11px] font-semibold border-primary/10 hover:bg-primary/5 hover:border-primary/20 flex relative min-w-[120px]" onClick={() => {
                                                         if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
                                                         setMessageCandidate(candidate);
                                                     }}>
@@ -895,7 +895,7 @@ function CandidatesPageContent() {
                                                         <MessageBadge count={candidate.unread_messages} />
                                                     </Button>
 
-                                                    <Button variant="secondary" size="sm" className="h-9 gap-2 text-[11px] font-semibold flex-1 lg:flex-none lg:min-w-[130px] border border-transparent hover:border-primary/20" onClick={() => {
+                                                    <Button variant="secondary" size="sm" className="h-9 gap-2 text-[11px] font-semibold flex-1 sm:flex-none sm:min-w-[130px] border border-transparent hover:border-primary/20" onClick={() => {
                                                         if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
                                                         setViewVacanciesCandidate(candidate);
                                                     }}>
@@ -903,7 +903,7 @@ function CandidatesPageContent() {
                                                         <span>{t('dashboard.candidates.applied_vacancies')}</span>
                                                     </Button>
 
-                                                    <Button variant="default" size="sm" className="h-9 gap-2 text-[11px] font-bold shadow-md shadow-primary/10 flex-1 lg:flex-none lg:min-w-[110px]" asChild onClick={() => {
+                                                    <Button variant="default" size="sm" className="h-9 gap-2 text-[11px] font-bold shadow-md shadow-primary/10 flex-1 sm:flex-none sm:min-w-[110px]" asChild onClick={() => {
                                                         if (candidate.status === 'new') handleStatusUpdate(candidate.id, 'reviewing');
                                                     }}>
                                                         <Link href={`/dashboard/invites?candidate=${candidate.id}`}>
