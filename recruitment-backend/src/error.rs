@@ -43,6 +43,9 @@ pub enum Error {
 
     #[error("Multipart error: {0}")]
     Multipart(#[from] axum::extract::multipart::MultipartError),
+
+    #[error("Excel export error: {0}")]
+    Xlsx(#[from] rust_xlsxwriter::XlsxError),
 }
 
 impl IntoResponse for Error {
@@ -58,6 +61,7 @@ impl IntoResponse for Error {
             Error::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             Error::Io(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
             Error::Multipart(err) => (StatusCode::BAD_REQUEST, err.to_string()),
+            Error::Xlsx(err) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Export error: {}", err)),
             Error::Anyhow(err) => (StatusCode::BAD_REQUEST, err.to_string()),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,

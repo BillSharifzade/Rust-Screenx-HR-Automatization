@@ -4,6 +4,7 @@ pub mod attempt_service;
 pub mod audit_service;
 pub mod embed_service;
 pub mod eval_service;
+pub mod export_service;
 pub mod external_vacancy_service;
 pub mod grading_service;
 pub mod notification_service;

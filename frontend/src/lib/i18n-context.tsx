@@ -40,12 +40,26 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const t = (path: string): string => {
         const keys = path.split('.');
         let value: any = translations;
+
         for (const key of keys) {
-            if (value[key] === undefined) {
+            if (value && value[key] !== undefined) {
+                value = value[key];
+            } else {
+                // If not found in primary path, try searching in 'common' if it's not already common
+                if (keys[0] !== 'common') {
+                    let commonValue: any = translations.common;
+                    if (commonValue && commonValue[path] !== undefined) {
+                        return commonValue[path];
+                    }
+                }
+
                 console.warn(`Translation key not found: ${path}`);
-                return path;
+                // Fallback to the last part of the key as a human-readable title-cased string
+                const fallback = keys[keys.length - 1]
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, c => c.toUpperCase());
+                return fallback;
             }
-            value = value[key];
         }
         return value;
     };

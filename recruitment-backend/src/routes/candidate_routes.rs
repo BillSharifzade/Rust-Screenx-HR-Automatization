@@ -536,106 +536,12 @@ pub async fn analyze_candidate_suitability(
     Ok(Json(updated))
 }
 
-#[derive(Debug, Serialize)]
-pub struct HistoryItem {
-    pub event_type: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub status: Option<String>,
-    pub metadata: Option<serde_json::Value>,
-}
 
 pub async fn get_candidate_history(
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<impl axum::response::IntoResponse> {
-    let mut history: Vec<HistoryItem> = Vec::new();
-    
-    let candidate = state.candidate_service.get_candidate(id).await
-        .map_err(|e| crate::error::Error::Internal(e.to_string()))?
-        .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".to_string()))?;
-    
-    history.push(HistoryItem {
-        event_type: "registration".to_string(),
-        title: "candidate_profile.event_registered".to_string(),
-        description: Some(candidate.email.clone()),
-        timestamp: candidate.created_at.unwrap_or_else(chrono::Utc::now),
-        status: Some("candidate_profile.status_completed".to_string()),
-        metadata: None,
-    });
-
-    if let (Some(created), Some(updated)) = (candidate.created_at, candidate.updated_at) {
-        if updated.signed_duration_since(created).num_minutes() > 1 {
-            history.push(HistoryItem {
-                event_type: "profile_update".to_string(),
-                title: "candidate_profile.event_update".to_string(),
-                description: None,
-                timestamp: updated,
-                status: Some("candidate_profile.status_completed".to_string()),
-                metadata: None,
-            });
-        }
-    }
-    
-    let applications = state.candidate_service.get_candidate_applications(id).await
-        .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
-    for app in applications {
-        history.push(HistoryItem {
-            event_type: "application".to_string(),
-            title: "candidate_profile.event_applied".to_string(),
-            description: Some(app.vacancy_id.to_string()),
-            timestamp: app.created_at.unwrap_or_else(chrono::Utc::now),
-            status: Some("candidate_profile.status_submitted".to_string()),
-            metadata: None,
-        });
-    }
-    
-    let attempt_svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
-    let attempts = attempt_svc.list_attempts(
-        None, 
-        Some(candidate.email.clone()),
-        None,
-        1,
-        100
-    ).await?;
-    
-    for attempt in attempts.0 {
-        let status_key = match attempt.status.as_str() {
-            "pending" => "dashboard.invites.statuses.pending",
-            "in_progress" => "dashboard.invites.statuses.in_progress",
-            "completed" => if attempt.passed.unwrap_or(false) { "candidate_profile.status_passed" } else { "candidate_profile.status_failed" },
-            "timeout" => "dashboard.invites.statuses.timeout",
-            "escaped" => "dashboard.invites.statuses.escaped",
-            "needs_review" => "dashboard.invites.statuses.needs_review",
-            _ => "dashboard.invites.statuses.pending",
-        };
-        
-        let desc = if let Some(score) = attempt.percentage {
-            Some(format!("{:.1}", score))
-        } else {
-            None
-        };
-        
-        history.push(HistoryItem {
-            event_type: "test_attempt".to_string(),
-            title: "candidate_profile.event_test".to_string(),
-            description: desc,
-            timestamp: attempt.created_at.unwrap_or_else(chrono::Utc::now),
-            status: Some(status_key.to_string()),
-            metadata: Some(serde_json::json!({
-                "attempt_id": attempt.id,
-                "test_id": attempt.test_id,
-                "passed": attempt.passed,
-                "score": attempt.score,
-                "percentage": attempt.percentage,
-                "raw_status": attempt.status,
-            })),
-        });
-    }
-    
-    history.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    
+    let history = state.candidate_service.get_candidate_history(id).await?;
     Ok(Json(history))
 }
 

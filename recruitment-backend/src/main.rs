@@ -257,6 +257,14 @@ async fn main() -> anyhow::Result<()> {
             "/api/integration/dashboard/stats",
             get(routes::integration::get_dashboard_stats),
         )
+        .route(
+            "/api/integration/candidates/:id/export",
+            get(routes::export::export_candidate),
+        )
+        .route(
+            "/api/integration/candidates/export",
+            post(routes::export::export_candidates_bulk),
+        )
 
         .layer(axum::middleware::from_fn_with_state(
             recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),

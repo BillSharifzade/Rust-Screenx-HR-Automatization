@@ -23,6 +23,16 @@ pub struct Candidate {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryItem {
+    pub event_type: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub status: Option<String>,
+    pub metadata: Option<JsonValue>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct CandidateApplication {
     pub id: i32,

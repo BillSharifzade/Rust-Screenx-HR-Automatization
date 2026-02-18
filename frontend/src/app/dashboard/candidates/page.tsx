@@ -10,7 +10,7 @@ import {
     Search, User, Mail, Phone, Calendar, Briefcase, FileText,
     Download, Sparkles, Binary, Loader2, LayoutGrid,
     List, History, CheckCircle2, Clock, XCircle, Send, MessageSquare,
-    AlertCircle, Cake, ChevronDown, Trash2
+    AlertCircle, Cake, ChevronDown, Trash2, FileSpreadsheet, Check
 } from "lucide-react"
 import { format } from "date-fns"
 import Link from "next/link"
@@ -45,6 +45,8 @@ import { apiFetch, deleteCandidate } from "@/lib/api"
 import { useTranslation } from "@/lib/i18n-context"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -85,6 +87,9 @@ function CandidatesPageContent() {
     const [isSendingMessage, setIsSendingMessage] = useState(false);
     const [isBlurring, setIsBlurring] = useState(false)
     const [isAnalyzingId, setIsAnalyzingId] = useState<string | null>(null)
+    const [isExporting, setIsExporting] = useState(false)
+    const [showExportDialog, setShowExportDialog] = useState(false)
+    const [selectedExportIds, setSelectedExportIds] = useState<Set<string>>(new Set())
     const chatContainerRef = useRef<HTMLDivElement>(null)
     const queryClient = useQueryClient()
     const { language } = useTranslation()
@@ -252,6 +257,66 @@ function CandidatesPageContent() {
             console.error(e);
             toast.error(t('candidate_profile.delete_error') || "Failed to delete candidate");
         }
+    };
+
+    const handleExportCandidate = async (candidateId: string, candidateName: string) => {
+        try {
+            setIsExporting(true);
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/integration/candidates/${candidateId}/export`);
+            if (!response.ok) throw new Error("Export failed");
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `candidate_${candidateName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            toast.success(t('common.export_success') || "Файл экспортирован");
+        } catch (e) {
+            console.error(e);
+            toast.error(t('common.export_error') || "Ошибка экспорта");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleBulkExport = async (ids?: string[]) => {
+        try {
+            setIsExporting(true);
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/integration/candidates/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ candidate_ids: ids || null }),
+            });
+            if (!response.ok) throw new Error("Export failed");
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `candidates_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            toast.success(t('common.export_success') || "Файл экспортирован");
+            setShowExportDialog(false);
+            setSelectedExportIds(new Set());
+        } catch (e) {
+            console.error(e);
+            toast.error(t('common.export_error') || "Ошибка экспорта");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const toggleExportId = (id: string) => {
+        setSelectedExportIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
     };
 
     const AiAssessmentDialog = ({ candidate, trigger }: { candidate: any, trigger: React.ReactNode }) => (
@@ -501,6 +566,19 @@ function CandidatesPageContent() {
                                 ))}
                             </SelectContent>
                         </Select>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-9 gap-2 border-emerald-500/20 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-500/40 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                            onClick={() => {
+                                setSelectedExportIds(new Set());
+                                setShowExportDialog(true);
+                            }}
+                            disabled={isExporting}
+                        >
+                            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                            <span className="hidden sm:inline">{t('common.export_excel')}</span>
+                        </Button>
                     </div>
                 </div>
             </motion.div>
@@ -572,6 +650,10 @@ function CandidatesPageContent() {
                                                         ))}
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
+
+                                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-emerald-500/10" onClick={() => handleExportCandidate(candidate.id, candidate.name)} title={t('common.export_excel')} disabled={isExporting}>
+                                                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                                                </Button>
 
                                                 <div className="relative">
                                                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-primary/10" onClick={() => {
@@ -797,6 +879,9 @@ function CandidatesPageContent() {
                                                             </Button>
                                                         }
                                                     />
+                                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-emerald-500/10 shadow-sm" onClick={() => handleExportCandidate(candidate.id, candidate.name)} title={t('common.export_excel')} disabled={isExporting}>
+                                                        <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                                                    </Button>
                                                 </div>
 
                                                 {/* Text Buttons */}
@@ -868,7 +953,12 @@ function CandidatesPageContent() {
                 </div>
             )}
 
-            <Dialog open={!!messageCandidate} onOpenChange={(open) => !open && setMessageCandidate(null)}>
+            <Dialog open={!!messageCandidate} onOpenChange={(open) => {
+                if (!open) {
+                    setMessageCandidate(null);
+                    queryClient.invalidateQueries({ queryKey: ["candidates"] });
+                }
+            }}>
                 <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
@@ -1055,6 +1145,85 @@ function CandidatesPageContent() {
                                 </div>
                             ))
                         )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+            {/* Bulk Export Dialog */}
+            <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+                <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+                            {t('common.export_excel')}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {t('common.export_desc')}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex items-center justify-between gap-2 py-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => {
+                                if (selectedExportIds.size === candidates?.length) {
+                                    setSelectedExportIds(new Set());
+                                } else {
+                                    setSelectedExportIds(new Set(candidates?.map((c: any) => c.id) || []));
+                                }
+                            }}
+                        >
+                            {selectedExportIds.size === candidates?.length ? (t('common.deselect_all') || 'Снять все') : (t('common.select_all') || 'Выбрать все')}
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                            {t('common.selected')}: {selectedExportIds.size} / {candidates?.length || 0}
+                        </span>
+                    </div>
+
+                    <ScrollArea className="flex-1 max-h-[400px] border rounded-lg">
+                        <div className="p-2 space-y-1">
+                            {candidates?.map((candidate: any) => (
+                                <label
+                                    key={candidate.id}
+                                    className={cn(
+                                        "flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors hover:bg-muted/50",
+                                        selectedExportIds.has(candidate.id) && "bg-emerald-50 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-950/30"
+                                    )}
+                                >
+                                    <Checkbox
+                                        checked={selectedExportIds.has(candidate.id)}
+                                        onCheckedChange={() => toggleExportId(candidate.id)}
+                                        className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium truncate">{candidate.name}</div>
+                                        <div className="text-xs text-muted-foreground truncate">{candidate.email}</div>
+                                    </div>
+                                    {renderStatus(candidate.status)}
+                                </label>
+                            ))}
+                        </div>
+                    </ScrollArea>
+
+                    <div className="flex items-center gap-2 pt-3 border-t">
+                        <Button
+                            variant="outline"
+                            className="flex-1 gap-2"
+                            onClick={() => handleBulkExport()}
+                            disabled={isExporting}
+                        >
+                            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            {t('common.download_all')}
+                        </Button>
+                        <Button
+                            className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            onClick={() => handleBulkExport(Array.from(selectedExportIds))}
+                            disabled={isExporting || selectedExportIds.size === 0}
+                        >
+                            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                            {t('common.download_selected')} ({selectedExportIds.size})
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>

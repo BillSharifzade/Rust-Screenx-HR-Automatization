@@ -16,6 +16,9 @@ COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+ARG BACKEND_URL=http://backend:8080
+ENV BACKEND_URL=${BACKEND_URL}
+
 RUN npm run build
 
 # Stage 3: Production runtime
