@@ -100,6 +100,15 @@ export const en = {
         timeout_msg: "Timed out, but all answers you managed to do are saved.",
         escaped_msg: "You exited the test, your answers have been saved.",
         answer_too_short: "Please provide a more detailed answer (at least 20 characters).",
+        anticheat: {
+            warning_title: "⚠️ Warning: Window Switch Detected",
+            warning_desc: "We have detected that you switched away from the test window. This activity is being tracked. If you leave the test window one more time, your test will be automatically terminated with a score of 0.",
+            warning_strikes: "Warnings remaining: {remaining}",
+            warning_btn: "I Understand, Continue Test",
+            terminated_title: "Test Terminated",
+            terminated_desc: "Your test has been automatically terminated due to multiple window switches. This is considered a violation of test rules. Your score has been set to 0.",
+            terminated_btn: "View Results",
+        },
     },
     candidate_profile: {
         title: "Your Profile",

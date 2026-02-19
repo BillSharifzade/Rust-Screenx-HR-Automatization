@@ -450,3 +450,25 @@ pub async fn heartbeat(
     svc.heartbeat(&token).await?;
     Ok(StatusCode::OK.into_response())
 }
+
+#[derive(serde::Deserialize)]
+pub struct ReportViolationRequest {
+    pub violation_type: Option<String>,
+}
+
+#[axum::debug_handler]
+pub async fn report_violation(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Json(req): Json<ReportViolationRequest>,
+) -> crate::error::Result<Response> {
+    let svc = AttemptService::new(state.pool.clone());
+    let violation_type = req.violation_type.as_deref().unwrap_or("tab_switch");
+    let (count, terminated) = svc.report_violation(&token, violation_type).await?;
+
+    Ok(Json(json!({
+        "tab_switches": count,
+        "terminated": terminated
+    }))
+    .into_response())
+}

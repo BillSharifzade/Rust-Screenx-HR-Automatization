@@ -558,6 +558,97 @@ impl AttemptService {
         Ok(())
     }
 
+    /// Report an anti-cheat violation (tab/window switch).
+    /// Returns (current_tab_switches, terminated: bool).
+    /// On the 2nd violation the test is auto-failed.
+    pub async fn report_violation(&self, token: &str, violation_type: &str) -> Result<(i32, bool)> {
+        let (attempt, _test) = self.get_attempt_and_test_by_token(token).await?;
+
+        // Only act on in-progress attempts
+        if attempt.status != "in_progress" {
+            let current = attempt.tab_switches.unwrap_or(0);
+            return Ok((current, attempt.status == "escaped"));
+        }
+
+        let new_count = attempt.tab_switches.unwrap_or(0) + 1;
+        let now = Utc::now();
+
+        // Build suspicious_activity log
+        let mut activity: Vec<serde_json::Value> = attempt
+            .suspicious_activity
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+
+        activity.push(json!({
+            "type": violation_type,
+            "tab_switches": new_count,
+            "timestamp": now.to_rfc3339(),
+        }));
+
+        let activity_json = serde_json::to_value(&activity)?;
+
+        const MAX_VIOLATIONS: i32 = 2;
+        let terminated = new_count >= MAX_VIOLATIONS;
+
+        if terminated {
+            // Auto-fail: set score to 0, status to 'escaped'
+            sqlx::query!(
+                r#"
+                UPDATE test_attempts
+                SET tab_switches = $1,
+                    suspicious_activity = $2,
+                    status = 'escaped',
+                    completed_at = $3,
+                    score = 0,
+                    max_score = COALESCE(max_score, 0),
+                    percentage = 0,
+                    passed = FALSE,
+                    updated_at = $3
+                WHERE access_token = $4
+                "#,
+                new_count,
+                activity_json,
+                now,
+                token
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| crate::error::Error::Internal(format!("Failed to terminate attempt: {}", e)))?;
+
+            tracing::warn!(
+                "Anti-cheat: Test auto-failed for token={} after {} tab switches",
+                token,
+                new_count
+            );
+        } else {
+            // Just increment the counter
+            sqlx::query!(
+                r#"
+                UPDATE test_attempts
+                SET tab_switches = $1,
+                    suspicious_activity = $2,
+                    updated_at = $3
+                WHERE access_token = $4
+                "#,
+                new_count,
+                activity_json,
+                now,
+                token
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| crate::error::Error::Internal(format!("Failed to record violation: {}", e)))?;
+
+            tracing::info!(
+                "Anti-cheat: Violation #{} recorded for token={}",
+                new_count,
+                token
+            );
+        }
+
+        Ok((new_count, terminated))
+    }
+
     pub async fn get_status_distribution(&self) -> Result<std::collections::HashMap<String, i64>> {
         let rows = sqlx::query!(
             r#"SELECT status as "status!", COUNT(*) as "count!" FROM test_attempts GROUP BY status"#

@@ -301,6 +301,10 @@ async fn main() -> anyhow::Result<()> {
             post(routes::public::heartbeat),
         )
         .route(
+            "/api/public/tests/:token/report-violation",
+            post(routes::public::report_violation),
+        )
+        .route(
             "/api/public/vacancies",
             get(routes::vacancy::list_public_vacancies),
         )
