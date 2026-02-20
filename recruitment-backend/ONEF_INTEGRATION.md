@@ -48,7 +48,8 @@ Triggered when a candidate applies for a vacancy (internal or external).
       "email": "john@example.com",
       "phone": "+123456789",
       "dob": "1990-01-01",
-      "cv_url": "https://domain.com/uploads/cv/uuid.pdf",
+      "cv_file_base64": "JVBERi0xLjQKJc...",
+      "cv_filename": "cv.pdf",
       "ai_rating": 85,
       "ai_comment": "Strong match based on experience."
     }
