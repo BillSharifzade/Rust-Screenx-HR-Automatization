@@ -1,0 +1,569 @@
+openapi: 3.0.3
+info:
+  title: OneF Integration API
+  description: Internal API for OneF (1F) ERP to communicate with the Recruitment Platform.
+  version: 1.2.0
+servers:
+  - url: http://10.10.10.25:8888/api/onef
+    description: Production Server
+  - url: http://localhost:8080/api/onef
+    description: Local Development Server
+
+paths:
+  /dashboard:
+    get:
+      summary: Get Dashboard Stats
+      description: Retrieves high-level recruitment metrics and funnel data.
+      tags:
+        - Dashboard
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFDashboardStats'
+
+  /candidates:
+    get:
+      summary: List Candidates
+      description: Retrieves a list of all registered candidates.
+      tags:
+        - Candidates
+      responses:
+        '200':
+          description: Array of candidates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OneFCandidateResponse'
+
+  /candidates/{id}:
+    get:
+      summary: Get Candidate Details
+      description: Retrieves full profile information for a specific candidate.
+      tags:
+        - Candidates
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Candidate details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFCandidateResponse'
+        '404':
+          description: Candidate not found
+
+  /candidates/{id}/status:
+    post:
+      summary: Update Candidate Status
+      description: Updates the recruitment status for a specific candidate.
+      tags:
+        - Candidates
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFUpdateStatusRequest'
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                  updated_at:
+                    type: string
+                    format: date-time
+
+  /candidates/{id}/analyze:
+    post:
+      summary: Analyze Candidate Suitability
+      description: Triggers a manual AI suitability analysis for the candidate.
+      tags:
+        - Candidates
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Analysis successful
+        '404':
+          description: Candidate not found
+
+  /candidates/{id}/attempts:
+    get:
+      summary: Get Candidate Test Attempts
+      description: Lists all test attempts for a specific candidate.
+      tags:
+        - Candidates
+        - Tests
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object # Attempt object
+                  total:
+                    type: integer
+
+  /messages:
+    post:
+      summary: Send Message to Candidate
+      description: Sends a message to a candidate via the Telegram Bot.
+      tags:
+        - Messaging
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFSendMessageRequest'
+      responses:
+        '200':
+          description: Message sent successfully
+        '400':
+          description: Candidate has no linked Telegram account
+        '404':
+          description: Candidate not found
+        '500':
+          description: Telegram API failure
+
+  /messages/{candidate_id}:
+    get:
+      summary: Get Chat History
+      description: Returns chat history for a candidate. Automatically marks inbound messages as read.
+      tags:
+        - Messaging
+      parameters:
+        - in: path
+          name: candidate_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Chat history array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OneFChatMessage'
+
+  /messages/unread:
+    get:
+      summary: Get Global Unread Messages Count
+      tags:
+        - Messaging
+      responses:
+        '200':
+          description: Unread message count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread_count:
+                    type: integer
+
+  /tests:
+    get:
+      summary: List Active Tests
+      description: Lists all active tests available for assignments.
+      tags:
+        - Tests
+      responses:
+        '200':
+          description: List of tests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OneFTestSummary'
+                  total:
+                    type: integer
+
+  /invites:
+    post:
+      summary: Create Test Invite
+      description: Generates a new test attempt/link for a candidate and notifies them via Telegram.
+      tags:
+        - Tests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFCreateInviteRequest'
+      responses:
+        '201':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt_id:
+                    type: string
+                    format: uuid
+                  access_token:
+                    type: string
+                  test_url:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                  status:
+                    type: string
+                  candidate_name:
+                    type: string
+                  test_title:
+                    type: string
+
+  /attempts_filter:
+    get:
+      summary: Filter Test Attempts
+      description: Filterable and paginated list of all test attempts.
+      tags:
+        - Tests
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: email
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Paginated attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /attempts:
+    get:
+      summary: List All Test Attempts
+      description: Returns a raw, unpaginated (or large limit) list of all attempts without filters.
+      tags:
+        - Tests
+      responses:
+        '200':
+          description: List of all attempt objects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /attempts/{id}:
+    get:
+      summary: Get Attempt Details
+      description: Retrieves detailed results for a specific attempt, including answers.
+      tags:
+        - Tests
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detailed attempt data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    type: object
+                  test_title:
+                    type: string
+                  test_type:
+                    type: string
+
+  /vacancies:
+    get:
+      summary: List Published Vacancies
+      description: Lists active internal and external (Koinoti Nav) vacancies.
+      tags:
+        - Vacancies
+      responses:
+        '200':
+          description: Array of vacancies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /vacancies/{id}:
+    get:
+      summary: Get Vacancy Details
+      description: Retrieves full details for a vacancy. Supports both internal UUIDs and external Numeric IDs (e.g. 141).
+      tags:
+        - Vacancies
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Internal UUID or External Numeric ID
+      responses:
+        '200':
+          description: Vacancy Object
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /dictionaries/candidate-statuses:
+    get:
+      summary: Dictionary of Candidate Statuses
+      tags:
+        - Dictionaries
+      responses:
+        '200':
+          description: Key-value pair options for dropdowns.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    label:
+                      type: string
+
+  /dictionaries/test-statuses:
+    get:
+      summary: Dictionary of Test Statuses
+      tags:
+        - Dictionaries
+      responses:
+        '200':
+          description: Key-value pair options for dropdowns.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    label:
+                      type: string
+
+components:
+  schemas:
+    OneFDashboardStats:
+      type: object
+      properties:
+        candidates_total:
+          type: integer
+        candidates_new_today:
+          type: integer
+        active_vacancies:
+          type: integer
+        test_attempts_pending:
+          type: integer
+        recruitment_funnel:
+          $ref: '#/components/schemas/RecruitmentFunnel'
+
+    RecruitmentFunnel:
+      type: object
+      properties:
+        registered:
+          type: integer
+        applied:
+          type: integer
+        test_started:
+          type: integer
+        test_completed:
+          type: integer
+        hired:
+          type: integer
+
+    OneFCandidateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        telegram_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        cv_url:
+          type: string
+          nullable: true
+        status:
+          type: string
+        ai_rating:
+          type: integer
+          nullable: true
+        ai_comment:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    OneFChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        is_read:
+          type: boolean
+
+    OneFTestSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        test_type:
+          type: string
+        duration_minutes:
+          type: integer
+        passing_score:
+          type: number
+          format: float
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    OneFSendMessageRequest:
+      type: object
+      required:
+        - candidate_id
+        - text
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+        text:
+          type: string
+
+    OneFUpdateStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+
+    OneFCreateInviteRequest:
+      type: object
+      required:
+        - candidate_id
+        - test_id
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+        test_id:
+          type: string
+          format: uuid

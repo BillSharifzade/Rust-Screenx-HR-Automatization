@@ -391,6 +391,10 @@ async fn main() -> anyhow::Result<()> {
             get(routes::onef::get_candidate_attempts),
         )
         .route(
+            "/api/onef/attempts_filter",
+            get(routes::onef::list_attempts_filter),
+        )
+        .route(
             "/api/onef/attempts",
             get(routes::onef::list_all_attempts),
         )

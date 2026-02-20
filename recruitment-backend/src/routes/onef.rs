@@ -27,7 +27,6 @@ pub struct OneFUpdateStatusRequest {
 pub struct OneFCreateInviteRequest {
     pub candidate_id: Uuid,
     pub test_id: Uuid,
-    pub expires_in_hours: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -283,7 +282,7 @@ pub async fn list_candidates(
     Ok(Json(response))
 }
 
-pub async fn list_all_attempts(
+pub async fn list_attempts_filter(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl IntoResponse> {
@@ -303,19 +302,83 @@ pub async fn list_all_attempts(
     })))
 }
 
+pub async fn list_all_attempts(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
+    // Get a large reasonable chunk (e.g. 1000) or ideally un-paginated if supported.
+    // For now we pass null filters.
+    let (items, _) = svc.list_attempts(None, None, None, 1, 1000).await?;
+
+    Ok(Json(items))
+}
+
 pub async fn list_vacancies(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
-    let vacancies = state.vacancy_service.list_published(50).await?;
-    Ok(Json(vacancies))
+    let mut combined = Vec::new();
+
+    // 1. Fetch internal published vacancies
+    if let Ok(internal) = state.vacancy_service.list_published(100).await {
+        for v in internal {
+            combined.push(serde_json::json!({
+                "id": v.id.to_string(),
+                "title": v.title,
+                "company": v.company,
+                "location": v.location,
+                "status": v.status,
+                "source": "internal",
+                "created_at": v.created_at,
+            }));
+        }
+    }
+
+    // 2. Fetch external vacancies from job.koinotinav.tj
+    if let Ok(external) = state.koinotinav_service.fetch_vacancies().await {
+        for v in external {
+            combined.push(serde_json::json!({
+                "id": v.id.to_string(),
+                "title": v.title,
+                "company": v.direction, // Mapping direction to company for external ones
+                "location": v.city,
+                "status": "published",
+                "source": "external",
+                "created_at": v.created_at,
+            }));
+        }
+    }
+
+    Ok(Json(combined))
 }
 
 pub async fn get_vacancy(
     State(state): State<AppState>,
-    Path(vacancy_id): Path<Uuid>,
+    Path(id_str): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let vacancy = state.vacancy_service.get_by_id(vacancy_id).await?;
-    Ok(Json(vacancy))
+    // 1. Try to parse as UUID (internal)
+    if let Ok(uuid) = Uuid::parse_str(&id_str) {
+        if let Ok(vacancy) = state.vacancy_service.get_by_id(uuid).await {
+            return Ok(Json(serde_json::to_value(vacancy).unwrap()));
+        }
+    }
+
+    // 2. Try to parse as i64 (external)
+    if let Ok(ext_id) = id_str.parse::<i64>() {
+        if let Ok(Some(ext_v)) = state.koinotinav_service.fetch_vacancy(ext_id).await {
+            return Ok(Json(json!({
+                "id": ext_v.id.to_string(),
+                "title": ext_v.title,
+                "company": ext_v.direction,
+                "location": ext_v.city,
+                "description": ext_v.content,
+                "status": "published",
+                "source": "external",
+                "created_at": ext_v.created_at,
+            })));
+        }
+    }
+
+    Err(crate::error::Error::NotFound("Vacancy not found".into()))
 }
 
 /// List all active tests available for invitations
@@ -391,7 +454,15 @@ pub async fn create_test_invite(
     let candidate = state.candidate_service.get_candidate(payload.candidate_id).await?
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
 
-    let expires_in_hours = payload.expires_in_hours.unwrap_or(48);
+    // Fetch test info early to calculate expires_in_hours
+    let test = state.test_service.get_test_by_id(payload.test_id).await?;
+
+    // If it's a presentation the duration represents the deadline. Otherwise, a default of 48h.
+    let expires_in_hours = if test.duration_minutes > 0 && test.test_type == "presentation" {
+        (test.duration_minutes / 60) as i64
+    } else {
+        48
+    };
 
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
     let result = svc.create_invite(
@@ -406,9 +477,6 @@ pub async fn create_test_invite(
         expires_in_hours,
         Some(json!({ "source": "onef" })),
     ).await?;
-
-    // Fetch test info for the Telegram notification
-    let test = state.test_service.get_test_by_id(payload.test_id).await?;
 
     // Send Telegram notification to the candidate
     if let Some(telegram_id) = candidate.telegram_id {

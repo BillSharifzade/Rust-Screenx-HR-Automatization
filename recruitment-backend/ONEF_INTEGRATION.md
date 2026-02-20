@@ -48,8 +48,7 @@ Triggered when a candidate applies for a vacancy (internal or external).
       "email": "john@example.com",
       "phone": "+123456789",
       "dob": "1990-01-01",
-      "cv_file_base64": "JVBERi0xLjQKJc...",
-      "cv_filename": "cv.pdf",
+      "cv_url": "https://recruit.work/uploads/cv_123.pdf",
       "ai_rating": 85,
       "ai_comment": "Strong match based on experience."
     }
@@ -211,16 +210,19 @@ Triggered when a grade is manually shared with OneF.
 ```json
 {
   "candidate_id": "uuid",
-  "test_id": "uuid",
-  "expires_in_hours": 48
+  "test_id": "uuid"
 }
 ```
 *   **Response:** Details of the created invitation, including the `test_url`.
 
+#### Filter Test Attempts
+*   **Endpoint:** `GET /attempts_filter`
+*   **Query Parameters:** `status`, `email`, `page`, `limit`
+*   **Description:** Filterable list of all test attempts with pagination payload.
+
 #### List All Attempts
 *   **Endpoint:** `GET /attempts`
-*   **Query Parameters:** `status`, `email`, `page`, `limit`
-*   **Description:** Filterable list of all test attempts.
+*   **Description:** Simple robust query without complex query params, directly emits all test attempts.
 
 #### Get Candidate Attempts
 *   **Endpoint:** `GET /candidates/{id}/attempts`

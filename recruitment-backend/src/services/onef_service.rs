@@ -37,9 +37,7 @@ pub struct OneFCandidateInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dob: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cv_file_base64: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cv_filename: Option<String>,
+    pub cv_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_rating: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,28 +136,10 @@ impl OneFService {
             }
         };
 
-        let (cv_file_base64, cv_filename) = if let Some(path) = &cv_url {
-            let upload_root = std::env::var("UPLOADS_DIR").unwrap_or_else(|_| "/app/uploads".to_string());
-            let clean_path = path.trim_start_matches("./").trim_start_matches("uploads/");
-            let clean_path = clean_path.trim_start_matches('/');
-            let abs_path = format!("{}/{}", upload_root, clean_path);
-            
-            let ext = std::path::Path::new(path)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("bin");
-            let filename = format!("cv.{}", ext);
-            
-            if let Ok(data) = tokio::fs::read(&abs_path).await {
-                use base64::prelude::*;
-                (Some(BASE64_STANDARD.encode(&data)), Some(filename))
-            } else {
-                warn!("Failed to read cv file for base64 encoding from path: {}", abs_path);
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
+        let full_cv_url = cv_url.map(|path| {
+            let config = crate::config::get_config();
+            format!("{}/{}", config.webapp_url, path)
+        });
 
         let payload = OneFApplicationPayload {
             event_type: "new_application".to_string(),
@@ -174,8 +154,7 @@ impl OneFService {
                 email,
                 phone,
                 dob: dob.map(|d| d.format("%Y-%m-%d").to_string()),
-                cv_file_base64,
-                cv_filename,
+                cv_url: full_cv_url,
                 ai_rating,
                 ai_comment,
             },
