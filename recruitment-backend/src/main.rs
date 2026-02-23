@@ -166,11 +166,11 @@ async fn main() -> anyhow::Result<()> {
             get(routes::koinotinav::list_external_vacancies),
         )
         .route(
-            "/api/integration/vacancies/external",
+            "/api/onef/vacancies/external",
             post(routes::external_vacancy::create_external_vacancy),
         )
         .route(
-            "/api/integration/vacancies/external/delete",
+            "/api/onef/vacancies/external/delete",
             post(routes::external_vacancy::delete_external_vacancy),
         )
         .route(

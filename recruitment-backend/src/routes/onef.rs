@@ -306,11 +306,24 @@ pub async fn list_all_attempts(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
-    // Get a large reasonable chunk (e.g. 1000) or ideally un-paginated if supported.
-    // For now we pass null filters.
     let (items, _) = svc.list_attempts(None, None, None, 1, 1000).await?;
 
     Ok(Json(items))
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut inside_tag = false;
+    for c in input.chars() {
+        if c == '<' {
+            inside_tag = true;
+        } else if c == '>' {
+            inside_tag = false;
+        } else if !inside_tag {
+            output.push(c);
+        }
+    }
+    output.trim().to_string()
 }
 
 pub async fn list_vacancies(
@@ -318,7 +331,6 @@ pub async fn list_vacancies(
 ) -> Result<impl IntoResponse> {
     let mut combined = Vec::new();
 
-    // 1. Fetch internal published vacancies
     if let Ok(internal) = state.vacancy_service.list_published(100).await {
         for v in internal {
             combined.push(serde_json::json!({
@@ -333,13 +345,12 @@ pub async fn list_vacancies(
         }
     }
 
-    // 2. Fetch external vacancies from job.koinotinav.tj
     if let Ok(external) = state.koinotinav_service.fetch_vacancies().await {
         for v in external {
             combined.push(serde_json::json!({
                 "id": v.id.to_string(),
-                "title": v.title,
-                "company": v.direction, // Mapping direction to company for external ones
+                "title": strip_html_tags(&v.title),
+                "company": v.direction, 
                 "location": v.city,
                 "status": "published",
                 "source": "external",
@@ -355,19 +366,17 @@ pub async fn get_vacancy(
     State(state): State<AppState>,
     Path(id_str): Path<String>,
 ) -> Result<impl IntoResponse> {
-    // 1. Try to parse as UUID (internal)
     if let Ok(uuid) = Uuid::parse_str(&id_str) {
         if let Ok(vacancy) = state.vacancy_service.get_by_id(uuid).await {
             return Ok(Json(serde_json::to_value(vacancy).unwrap()));
         }
     }
 
-    // 2. Try to parse as i64 (external)
     if let Ok(ext_id) = id_str.parse::<i64>() {
         if let Ok(Some(ext_v)) = state.koinotinav_service.fetch_vacancy(ext_id).await {
             return Ok(Json(json!({
                 "id": ext_v.id.to_string(),
-                "title": ext_v.title,
+                "title": strip_html_tags(&ext_v.title),
                 "company": ext_v.direction,
                 "location": ext_v.city,
                 "description": ext_v.content,
@@ -381,7 +390,6 @@ pub async fn get_vacancy(
     Err(crate::error::Error::NotFound("Vacancy not found".into()))
 }
 
-/// List all active tests available for invitations
 pub async fn list_tests(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
@@ -445,19 +453,13 @@ pub async fn list_test_statuses(
     ])))
 }
 
-/// Create a test invitation for a candidate
 pub async fn create_test_invite(
     State(state): State<AppState>,
     Json(payload): Json<OneFCreateInviteRequest>,
 ) -> Result<impl IntoResponse> {
-    // Look up the candidate
     let candidate = state.candidate_service.get_candidate(payload.candidate_id).await?
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
-
-    // Fetch test info early to calculate expires_in_hours
     let test = state.test_service.get_test_by_id(payload.test_id).await?;
-
-    // If it's a presentation the duration represents the deadline. Otherwise, a default of 48h.
     let expires_in_hours = if test.duration_minutes > 0 && test.test_type == "presentation" {
         (test.duration_minutes / 60) as i64
     } else {
@@ -477,8 +479,6 @@ pub async fn create_test_invite(
         expires_in_hours,
         Some(json!({ "source": "onef" })),
     ).await?;
-
-    // Send Telegram notification to the candidate
     if let Some(telegram_id) = candidate.telegram_id {
         let config = crate::config::get_config();
         let webapp_url = &config.webapp_url;
@@ -526,7 +526,6 @@ pub async fn create_test_invite(
         }
     }
 
-    // Enqueue webhook notification
     let notif = crate::services::notification_service::NotificationService::new(
         state.pool.clone(),
         crate::config::get_config().telegram_bot_webhook_url.clone(),

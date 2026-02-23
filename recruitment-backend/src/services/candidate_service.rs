@@ -362,7 +362,6 @@ impl CandidateService {
     pub async fn delete_candidate(&self, id: uuid::Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // 1. Fetch email to link with test_attempts
         let candidate = sqlx::query!("SELECT email FROM candidates WHERE id = $1", id)
             .fetch_optional(&mut *tx)
             .await?;
@@ -370,22 +369,15 @@ impl CandidateService {
         if let Some(c) = candidate {
             let email = c.email;
 
-            // 2. Delete test attempts (linked by email)
             sqlx::query!("DELETE FROM test_attempts WHERE candidate_email = $1", email)
                 .execute(&mut *tx)
                 .await?;
-
-            // 3. Delete applications
             sqlx::query!("DELETE FROM candidate_applications WHERE candidate_id = $1", id)
                 .execute(&mut *tx)
                 .await?;
-
-            // 4. Delete messages
             sqlx::query!("DELETE FROM messages WHERE candidate_id = $1", id)
                 .execute(&mut *tx)
                 .await?;
-
-            // 5. Delete the candidate
             sqlx::query!("DELETE FROM candidates WHERE id = $1", id)
                 .execute(&mut *tx)
                 .await?;

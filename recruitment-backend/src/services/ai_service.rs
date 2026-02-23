@@ -288,7 +288,6 @@ Rules:
                 Ok(vec![BASE64.encode(&data)])
             }
             "doc" | "docx" | "rtf" | "odt" => {
-                // Convert to PDF first via LibreOffice, then extract images from the PDF
                 let temp_dir = format!("/tmp/cv_topdf_{}", uuid::Uuid::new_v4());
                 fs::create_dir_all(&temp_dir).await?;
 
@@ -319,7 +318,6 @@ Rules:
                     }
                 }
 
-                // Find the generated PDF
                 let mut pdf_path = None;
                 let mut entries = fs::read_dir(&temp_dir).await?;
                 while let Some(entry) = entries.next_entry().await? {
@@ -345,7 +343,6 @@ Rules:
         }
     }
 
-    /// Convert a PDF file to base64-encoded PNG images (one per page, max 3).
     async fn pdf_to_images(&self, pdf_path: &str) -> Result<Vec<String>> {
         let temp_dir = format!("/tmp/cv_images_{}", uuid::Uuid::new_v4());
         fs::create_dir_all(&temp_dir).await?;

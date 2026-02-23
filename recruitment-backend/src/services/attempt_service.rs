@@ -558,13 +558,9 @@ impl AttemptService {
         Ok(())
     }
 
-    /// Report an anti-cheat violation (tab/window switch).
-    /// Returns (current_tab_switches, terminated: bool).
-    /// On the 2nd violation the test is auto-failed.
     pub async fn report_violation(&self, token: &str, violation_type: &str) -> Result<(i32, bool)> {
         let (attempt, _test) = self.get_attempt_and_test_by_token(token).await?;
 
-        // Only act on in-progress attempts
         if attempt.status != "in_progress" {
             let current = attempt.tab_switches.unwrap_or(0);
             return Ok((current, attempt.status == "escaped"));
@@ -573,7 +569,6 @@ impl AttemptService {
         let new_count = attempt.tab_switches.unwrap_or(0) + 1;
         let now = Utc::now();
 
-        // Build suspicious_activity log
         let mut activity: Vec<serde_json::Value> = attempt
             .suspicious_activity
             .and_then(|v| serde_json::from_value(v).ok())
@@ -591,7 +586,6 @@ impl AttemptService {
         let terminated = new_count >= MAX_VIOLATIONS;
 
         if terminated {
-            // Auto-fail: set score to 0, status to 'escaped'
             sqlx::query!(
                 r#"
                 UPDATE test_attempts
@@ -621,7 +615,6 @@ impl AttemptService {
                 new_count
             );
         } else {
-            // Just increment the counter
             sqlx::query!(
                 r#"
                 UPDATE test_attempts

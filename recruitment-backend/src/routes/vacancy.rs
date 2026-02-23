@@ -15,6 +15,15 @@ use crate::{
     AppState,
 };
 
+#[utoipa::path(
+    post,
+    path = "/api/integration/vacancies",
+    request_body = CreateVacancyPayload,
+    responses(
+        (status = 201, description = "Vacancy created successfully", body = Json<VacancyResponse>),
+        (status = 400, description = "Invalid payload")
+    )
+)]
 #[axum::debug_handler]
 pub async fn create_vacancy(
     State(state): State<AppState>,
@@ -25,6 +34,19 @@ pub async fn create_vacancy(
     Ok((StatusCode::CREATED, Json(VacancyResponse::from(vacancy))))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/integration/vacancies/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Vacancy ID")
+    ),
+    request_body = UpdateVacancyPayload,
+    responses(
+        (status = 200, description = "Vacancy updated successfully", body = Json<VacancyResponse>),
+        (status = 400, description = "Invalid payload"),
+        (status = 404, description = "Vacancy not found")
+    )
+)]
 #[axum::debug_handler]
 pub async fn update_vacancy(
     State(state): State<AppState>,
@@ -36,6 +58,17 @@ pub async fn update_vacancy(
     Ok(Json(VacancyResponse::from(vacancy)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/integration/vacancies/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Vacancy ID")
+    ),
+    responses(
+        (status = 204, description = "Vacancy deleted successfully"),
+        (status = 404, description = "Vacancy not found")
+    )
+)]
 #[axum::debug_handler]
 pub async fn delete_vacancy(
     State(state): State<AppState>,
@@ -45,6 +78,20 @@ pub async fn delete_vacancy(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/integration/vacancies",
+    params(
+        ("page" = Option<i64>, Query, description = "Page number"),
+        ("per_page" = Option<i64>, Query, description = "Items per page"),
+        ("status" = Option<String>, Query, description = "Filter by status"),
+        ("company" = Option<String>, Query, description = "Filter by company"),
+        ("search" = Option<String>, Query, description = "Search query")
+    ),
+    responses(
+        (status = 200, description = "List of vacancies", body = Json<VacancyListResponse>)
+    )
+)]
 #[axum::debug_handler]
 pub async fn list_vacancies(
     State(state): State<AppState>,
@@ -54,6 +101,17 @@ pub async fn list_vacancies(
     Ok(Json(VacancyListResponse::from(result)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/integration/vacancies/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Vacancy ID")
+    ),
+    responses(
+        (status = 200, description = "Vacancy found", body = Json<VacancyResponse>),
+        (status = 404, description = "Vacancy not found")
+    )
+)]
 #[axum::debug_handler]
 pub async fn get_vacancy(
     State(state): State<AppState>,
@@ -63,6 +121,16 @@ pub async fn get_vacancy(
     Ok(Json(VacancyResponse::from(vacancy)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/vacancies",
+    params(
+        ("limit" = Option<i64>, Query, description = "Number of items to return")
+    ),
+    responses(
+        (status = 200, description = "List of public vacancies", body = Json<VacancyPublicListResponse>)
+    )
+)]
 #[axum::debug_handler]
 pub async fn list_public_vacancies(
     State(state): State<AppState>,
@@ -74,6 +142,17 @@ pub async fn list_public_vacancies(
     Ok(Json(VacancyPublicListResponse { items: summaries }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/vacancies/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Vacancy ID")
+    ),
+    responses(
+        (status = 200, description = "Public vacancy found", body = Json<VacancyResponse>),
+        (status = 404, description = "Vacancy not found")
+    )
+)]
 #[axum::debug_handler]
 pub async fn get_public_vacancy(
     State(state): State<AppState>,

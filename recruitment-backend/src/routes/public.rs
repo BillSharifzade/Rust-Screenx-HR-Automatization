@@ -93,7 +93,6 @@ pub async fn start_test(
                 questions: updated.questions_snapshot,
             };
 
-            // Notify OneF
             let onef = state.onef_service.clone();
             let cand_svc = state.candidate_service.clone();
             let attempt_id = updated.id;
@@ -346,7 +345,6 @@ pub async fn submit_test(
                 tracing::error!("Failed to enqueue webhook: {:?}", e);
             }
 
-            // Notify OneF
             let onef = state.onef_service.clone();
             let cand_svc = state.candidate_service.clone();
             let attempt_id = attempt.id;

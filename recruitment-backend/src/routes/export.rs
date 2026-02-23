@@ -13,7 +13,6 @@ pub struct BulkExportRequest {
     pub candidate_ids: Option<Vec<uuid::Uuid>>,
 }
 
-/// Export a single candidate as XLSX
 pub async fn export_candidate(
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
@@ -21,7 +20,6 @@ pub async fn export_candidate(
     let candidate = state.candidate_service.get_candidate(id).await?
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
 
-    // Prepare data for export
     let vacancies = state.koinotinav_service.fetch_vacancies().await.unwrap_or_default();
     let mut vacancy_map = HashMap::new();
     for v in vacancies {
@@ -53,7 +51,6 @@ pub async fn export_candidate(
     ))
 }
 
-/// Export multiple or all candidates as XLSX
 pub async fn export_candidates_bulk(
     State(state): State<AppState>,
     Json(payload): Json<BulkExportRequest>,
@@ -69,7 +66,6 @@ pub async fn export_candidates_bulk(
         state.candidate_service.list_candidates().await?
     };
 
-    // Prepare data for export
     let vacancies = state.koinotinav_service.fetch_vacancies().await.unwrap_or_default();
     let mut vacancy_map = HashMap::new();
     for v in vacancies {

@@ -368,28 +368,50 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-
-  /vacancies/{id}:
-    get:
-      summary: Get Vacancy Details
-      description: Retrieves full details for a vacancy. Supports both internal UUIDs and external Numeric IDs (e.g. 141).
+                  $ref: '#/components/schemas/OneFVacancyResponse'
+  /vacancies/external:
+    post:
+      summary: Create External Vacancy (Triggers Selenium Script)
+      description: Launches Python Selenium to create a vacancy in job.koinotinav.tj.
       tags:
         - Vacancies
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-          description: Internal UUID or External Numeric ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFExternalVacancyPayload'
       responses:
-        '200':
-          description: Vacancy Object
+        '202':
+          description: Workflow queued/accepted successfully
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/OneFExternalVacancyResult'
+        '400':
+          description: Invalid payload
+
+  /vacancies/external/delete:
+    post:
+      summary: Delete External Vacancy (Triggers Selenium Script)
+      description: Launches Python Selenium to delete an external vacancy.
+      tags:
+        - Vacancies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFExternalVacancyDeletePayload'
+      responses:
+        '202':
+          description: Workflow queued/accepted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFExternalVacancyResult'
+        '400':
+          description: Invalid payload
 
   /dictionaries/candidate-statuses:
     get:
@@ -567,3 +589,90 @@ components:
         test_id:
           type: string
           format: uuid
+
+
+    OneFVacancyResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        company:
+          type: string
+        location:
+          type: string
+        status:
+          type: string
+        source:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    OneFExternalVacancyPayload:
+      type: object
+      required:
+        - email
+        - password
+        - title
+        - content
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        city:
+          type: string
+          nullable: true
+        direction:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        hot:
+          type: boolean
+          default: false
+        driver_binary:
+          type: string
+          nullable: true
+
+    OneFExternalVacancyDeletePayload:
+      type: object
+      required:
+        - email
+        - password
+        - vacancy_id
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        vacancy_id:
+          type: string
+        driver_binary:
+          type: string
+          nullable: true
+
+    OneFExternalVacancyResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        vacancy_id:
+          type: string
+          nullable: true
+        stdout:
+          type: string
+          nullable: true
+        stderr:
+          type: string
+          nullable: true
+

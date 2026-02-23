@@ -66,7 +66,6 @@ async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
         crate::error::Error::Internal(format!("Failed to save file: {}", e))
     })?;
 
-    // Return the PUBLIC relative path for the database
     Ok(format!("uploads/cv/{}", safe_filename))
 }
 
@@ -107,7 +106,6 @@ async fn extract_text_from_file(file_path: &str) -> String {
     }
 }
 
-/// Convert DOC/DOCX/RTF/ODT to plain text using LibreOffice in headless mode.
 async fn extract_text_via_libreoffice(file_path: &str) -> String {
     let temp_dir = format!("/tmp/cv_convert_{}", uuid::Uuid::new_v4());
     if let Err(e) = fs::create_dir_all(&temp_dir).await {
@@ -136,7 +134,6 @@ async fn extract_text_via_libreoffice(file_path: &str) -> String {
                 );
                 String::new()
             } else {
-                // Find the generated .txt file in temp_dir
                 let mut text = String::new();
                 if let Ok(mut entries) = fs::read_dir(&temp_dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
@@ -557,7 +554,6 @@ pub async fn update_candidate_status(
 
     let updated = state.candidate_service.update_status(id, status.clone()).await?;
 
-    // Push to OneF
     let onef = state.onef_service.clone();
     tokio::spawn(async move {
         let _ = onef.notify_candidate_status(id, status).await;
