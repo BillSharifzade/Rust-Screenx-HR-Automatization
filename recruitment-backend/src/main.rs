@@ -32,36 +32,50 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState::new(pool);
 
     {
-        let bot_token = config.telegram_bot_token.clone();
-        let target_webhook_url = format!("{}/api/webhook/telegram", config.webapp_url);
-        
-        info!("Checking Telegram webhook status...");
-        
-        match reqwest::get(format!("https://api.telegram.org/bot{}/getWebhookInfo", bot_token)).await {
-            Ok(resp) => {
-                if let Ok(info) = resp.json::<serde_json::Value>().await {
-                    let current_url = info["result"]["url"].as_str().unwrap_or("");
+        tokio::spawn(async move {
+            loop {
+                let config = get_config();
+                let bot_token = config.telegram_bot_token.clone();
+                let target_webhook_url = format!("{}/api/webhook/telegram", config.webapp_url);
+                
+                if !bot_token.is_empty() && !config.webapp_url.is_empty() {
+                    info!("Checking Telegram webhook status...");
                     
-                    if current_url == target_webhook_url {
-                        info!("Telegram webhook is already up to date: {}", current_url);
-                    } else {
-                        info!("Updating Telegram webhook: {} -> {}", current_url, target_webhook_url);
-                        let set_url = format!(
-                            "https://api.telegram.org/bot{}/setWebhook?url={}",
-                            bot_token, target_webhook_url
-                        );
-                        if let Ok(set_resp) = reqwest::get(&set_url).await {
-                            if set_resp.status().is_success() {
-                                info!("Telegram webhook registered successfully");
-                            } else {
-                                tracing::warn!("Failed to register Telegram webhook: {:?}", set_resp.status());
+                    match reqwest::get(format!("https://api.telegram.org/bot{}/getWebhookInfo", bot_token)).await {
+                        Ok(resp) => {
+                            if let Ok(info) = resp.json::<serde_json::Value>().await {
+                                let current_url = info["result"]["url"].as_str().unwrap_or("");
+                                
+                                if current_url == target_webhook_url {
+                                    info!("Telegram webhook is already up to date: {}", current_url);
+                                } else {
+                                    info!("Updating Telegram webhook: '{}' -> '{}'", current_url, target_webhook_url);
+                                    let set_url = format!(
+                                        "https://api.telegram.org/bot{}/setWebhook?url={}",
+                                        bot_token, target_webhook_url
+                                    );
+                                    match reqwest::get(&set_url).await {
+                                        Ok(set_resp) => {
+                                            if set_resp.status().is_success() {
+                                                info!("Telegram webhook registered successfully");
+                                            } else {
+                                                tracing::warn!("Failed to register Telegram webhook: {:?}", set_resp.status());
+                                            }
+                                        }
+                                        Err(e) => tracing::warn!("Failed to send setWebhook request: {:?}", e),
+                                    }
+                                }
                             }
                         }
+                        Err(e) => tracing::warn!("Could not check Telegram webhook status: {:?}", e),
                     }
+                } else {
+                    tracing::warn!("Telegram bot token or webapp URL is missing, skipping webhook registration");
                 }
+                
+                tokio::time::sleep(Duration::from_secs(1800)).await;
             }
-            Err(e) => tracing::warn!("Could not check Telegram webhook status: {:?}", e),
-        }
+        });
     }
 
     {
@@ -154,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
             post(routes::integration::generate_ai_test),
         )
         .route(
-            "/api/integration/vacancies/description",
+            "/api/onef/vacancies/description",
             post(routes::integration::generate_vacancy_description),
         )
         .route(

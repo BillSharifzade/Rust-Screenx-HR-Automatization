@@ -413,6 +413,31 @@ paths:
         '400':
           description: Invalid payload
 
+  /vacancies/description:
+    post:
+      summary: Generate AI Vacancy Description
+      description: Uses OpenAI to generate a professional vacancy description based on provided parameters (title, company, location, skills, etc.).
+      tags:
+        - Vacancies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFGenerateDescriptionPayload'
+      responses:
+        '200':
+          description: AI-generated description
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  description:
+                    type: string
+        '400':
+          description: Invalid payload
+
   /dictionaries/candidate-statuses:
     get:
       summary: Dictionary of Candidate Statuses
@@ -676,3 +701,40 @@ components:
           type: string
           nullable: true
 
+    OneFGenerateDescriptionPayload:
+      type: object
+      required:
+        - title
+        - company
+        - location
+      properties:
+        title:
+          type: string
+        company:
+          type: string
+        location:
+          type: string
+        language:
+          type: string
+          nullable: true
+        age:
+          type: string
+          nullable: true
+        education:
+          type: string
+          nullable: true
+        working_experience:
+          type: string
+          nullable: true
+        professional_skills:
+          type: string
+          nullable: true
+        computer_knowledge:
+          type: string
+          nullable: true
+        personal_qualities:
+          type: string
+          nullable: true
+        schedule:
+          type: string
+          nullable: true
