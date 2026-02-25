@@ -64,9 +64,22 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
                         queryClient.invalidateQueries({ queryKey: ["candidates"] });
                     }
 
-                    // Show toast only if not on the page
-                    if (pathname !== '/dashboard/candidates') {
-                        toast.info(t('notifications.new_candidates').replace('{count}', newCandidates.toString()), {
+                    // Play calm notification sound
+                    try {
+                        const audio = new Audio('/notification.mp3');
+                        audio.volume = 0.5;
+                        audio.play().catch(e => console.log('Audio play failed:', e));
+                    } catch (e) {
+                        console.log('Audio setup failed:', e);
+                    }
+
+                    // Always show toast
+                    if (newCandidates === 1) {
+                        toast.success(t('notifications.new_candidate_single'), {
+                            description: t('notifications.last_candidate').replace('{name}', data.candidates[0].name)
+                        });
+                    } else {
+                        toast.success(t('notifications.new_candidates_multiple').replace('{count}', newCandidates.toString()), {
                             description: t('notifications.last_candidate').replace('{name}', data.candidates[0].name)
                         });
                     }

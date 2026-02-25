@@ -93,6 +93,11 @@ pub async fn handle_webhook(
                     }
                     
                     params.push(format!("telegram_id={}", user_id));
+
+                    if let Some(dob) = fetch_telegram_birthdate(user_id).await {
+                        params.push(format!("dob={}", dob));
+                        tracing::info!("Fetched birthday for user {}: {}", user_id, dob);
+                    }
                     
                     (
                         "Здравствуйте! Чтобы присоединиться к нашему процессу найма, пожалуйста, зарегистрируйте свой профиль:", 
@@ -148,4 +153,33 @@ async fn send_telegram_message(
     println!("Telegram API response: {} - {}", status, response_text);
     
     Ok(())
+}
+
+/// Calls Telegram Bot API `getChat` to fetch the user's birthday.
+/// Returns `Some("YYYY-MM-DD")` if the user has a birthday set, `None` otherwise.
+/// The `birthdate` field (Bot API 7.2+) contains `day`, `month`, and optionally `year`.
+async fn fetch_telegram_birthdate(user_id: i64) -> Option<String> {
+    let config = crate::config::get_config();
+    let url = format!(
+        "https://api.telegram.org/bot{}/getChat?chat_id={}",
+        config.telegram_bot_token, user_id
+    );
+
+    let resp = reqwest::get(&url).await.ok()?;
+    let json: serde_json::Value = resp.json().await.ok()?;
+
+    let birthdate = json.get("result")?.get("birthdate")?;
+    let day = birthdate.get("day")?.as_u64()?;
+    let month = birthdate.get("month")?.as_u64()?;
+
+    // `year` is optional in Telegram's API — some users only set day+month
+    let year = birthdate.get("year").and_then(|y| y.as_u64());
+
+    if let Some(y) = year {
+        Some(format!("{:04}-{:02}-{:02}", y, month, day))
+    } else {
+        // Without a year we can't use it as a full DOB — skip
+        tracing::info!("User {} has birthday day/month but no year, skipping DOB auto-fill", user_id);
+        None
+    }
 }

@@ -651,9 +651,6 @@ function CandidatesPageContent() {
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
 
-                                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-emerald-500/10" onClick={() => handleExportCandidate(candidate.id, candidate.name)} title={t('common.export_excel')} disabled={isExporting}>
-                                                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                                                </Button>
 
                                                 <div className="relative">
                                                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md hover:bg-primary/10" onClick={() => {
@@ -879,9 +876,6 @@ function CandidatesPageContent() {
                                                             </Button>
                                                         }
                                                     />
-                                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-emerald-500/10 shadow-sm" onClick={() => handleExportCandidate(candidate.id, candidate.name)} title={t('common.export_excel')} disabled={isExporting}>
-                                                        <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
-                                                    </Button>
                                                 </div>
 
                                                 {/* Text Buttons */}
@@ -1181,30 +1175,28 @@ function CandidatesPageContent() {
                         </span>
                     </div>
 
-                    <ScrollArea className="flex-1 max-h-[400px] border rounded-lg">
-                        <div className="p-2 space-y-1">
-                            {candidates?.map((candidate: any) => (
-                                <label
-                                    key={candidate.id}
-                                    className={cn(
-                                        "flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors hover:bg-muted/50",
-                                        selectedExportIds.has(candidate.id) && "bg-emerald-50 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-950/30"
-                                    )}
-                                >
-                                    <Checkbox
-                                        checked={selectedExportIds.has(candidate.id)}
-                                        onCheckedChange={() => toggleExportId(candidate.id)}
-                                        className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-medium truncate">{candidate.name}</div>
-                                        <div className="text-xs text-muted-foreground truncate">{candidate.email}</div>
-                                    </div>
-                                    {renderStatus(candidate.status)}
-                                </label>
-                            ))}
-                        </div>
-                    </ScrollArea>
+                    <div className="flex-1 min-h-0 overflow-y-auto border rounded-lg p-2 space-y-1">
+                        {candidates?.map((candidate: any) => (
+                            <label
+                                key={candidate.id}
+                                className={cn(
+                                    "flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors hover:bg-muted/50",
+                                    selectedExportIds.has(candidate.id) && "bg-emerald-50 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-950/30"
+                                )}
+                            >
+                                <Checkbox
+                                    checked={selectedExportIds.has(candidate.id)}
+                                    onCheckedChange={() => toggleExportId(candidate.id)}
+                                    className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium truncate">{candidate.name}</div>
+                                    <div className="text-xs text-muted-foreground truncate">{candidate.email}</div>
+                                </div>
+                                {renderStatus(candidate.status)}
+                            </label>
+                        ))}
+                    </div>
 
                     <div className="flex items-center gap-2 pt-3 border-t">
                         <Button

@@ -614,6 +614,10 @@ components:
         test_id:
           type: string
           format: uuid
+        expires_in_hours:
+          type: integer
+          description: Expiration time in hours. Defaults to 48 for tests, or calculated for presentations if duration is set.
+          default: 48
 
 
     OneFVacancyResponse:

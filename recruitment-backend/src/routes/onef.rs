@@ -27,6 +27,7 @@ pub struct OneFUpdateStatusRequest {
 pub struct OneFCreateInviteRequest {
     pub candidate_id: Uuid,
     pub test_id: Uuid,
+    pub expires_in_hours: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -460,11 +461,13 @@ pub async fn create_test_invite(
     let candidate = state.candidate_service.get_candidate(payload.candidate_id).await?
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
     let test = state.test_service.get_test_by_id(payload.test_id).await?;
-    let expires_in_hours = if test.duration_minutes > 0 && test.test_type == "presentation" {
-        (test.duration_minutes / 60) as i64
-    } else {
-        48
-    };
+    let expires_in_hours = payload.expires_in_hours.unwrap_or_else(|| {
+        if test.duration_minutes > 0 && test.test_type == "presentation" {
+            (test.duration_minutes / 60) as i64
+        } else {
+            48
+        }
+    });
 
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
     let result = svc.create_invite(
@@ -490,10 +493,9 @@ pub async fn create_test_invite(
                 .and_then(|t| t.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            let deadline_hours = test.duration_minutes / 60;
             format!(
                 "Вам назначена презентация: {}\n\nКоличество тем: {}\nСрок выполнения: {} часов\n\nНажмите кнопку ниже, чтобы просмотреть задание.",
-                test.title, themes_count, deadline_hours
+                test.title, themes_count, expires_in_hours
             )
         } else {
             format!(

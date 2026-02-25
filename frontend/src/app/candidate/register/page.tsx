@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -51,6 +51,7 @@ export default function RegisterPage() {
     const [file, setFile] = useState<File | null>(null);
     const [telegramData, setTelegramData] = useState<any>(null);
     const [dob, setDob] = useState<Date | undefined>(undefined);
+    const [dobInput, setDobInput] = useState<string>('');
 
     // Vacancy Selection State
     const [vacancyOpen, setVacancyOpen] = useState(false);
@@ -72,8 +73,12 @@ export default function RegisterPage() {
     });
 
     const vacancies = vacancyData?.vacancies || [];
+    const hasInitialized = useRef(false);
 
     useEffect(() => {
+        if (hasInitialized.current) return;
+        hasInitialized.current = true;
+
         // @ts-ignore
         const tg = window?.Telegram?.WebApp;
         const searchParams = new URLSearchParams(window.location.search);
@@ -104,12 +109,13 @@ export default function RegisterPage() {
                 form.setValue('phone', phone);
             }
 
-            // Autopaste DOB (from Telegram or URL)
-            const dobParam = user?.dob || searchParams.get('dob');
+            // Autopaste DOB (from URL params only — Telegram API does not expose DOB)
+            const dobParam = searchParams.get('dob');
             if (dobParam && !dob) {
                 const parsedDate = new Date(dobParam);
                 if (!isNaN(parsedDate.getTime())) {
                     setDob(parsedDate);
+                    setDobInput(format(parsedDate, 'dd.MM.yyyy'));
                 }
             }
         } else {
@@ -139,15 +145,48 @@ export default function RegisterPage() {
                 const parsedDate = new Date(dobParam);
                 if (!isNaN(parsedDate.getTime())) {
                     setDob(parsedDate);
+                    setDobInput(format(parsedDate, 'dd.MM.yyyy'));
                 }
             }
         }
-    }, [form, dob]);
+    }, [form]);
 
     const handleSelectVacancyFromTab = (vacancy: ExternalVacancy) => {
         form.setValue('vacancy_id', vacancy.id);
         setActiveTab('register');
         toast.success(`${t('common.success')}: ${vacancy.title.replace(/<[^>]*>?/gm, '')}`);
+    };
+
+    const handleDobChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        let val = e.target.value.replace(/\D/g, ''); // Remove non-digits
+        if (val.length > 8) val = val.slice(0, 8); // Max 8 digits
+
+        // Formatting as DD.MM.YYYY
+        if (val.length >= 5) {
+            val = `${val.slice(0, 2)}.${val.slice(2, 4)}.${val.slice(4)}`;
+        } else if (val.length >= 3) {
+            val = `${val.slice(0, 2)}.${val.slice(2)}`;
+        }
+
+        setDobInput(val);
+
+        if (val.length === 10) {
+            const [day, month, year] = val.split('.');
+            const parsedDate = new Date(`${year}-${month}-${day}`);
+            const currentYear = new Date().getFullYear();
+            if (
+                !isNaN(parsedDate.getTime()) &&
+                parsedDate.getFullYear() > 1900 &&
+                parsedDate.getFullYear() <= currentYear - 16 &&
+                parsedDate.getDate() === parseInt(day, 10)
+            ) {
+                setDob(parsedDate);
+            } else {
+                setDob(undefined);
+            }
+        } else {
+            setDob(undefined);
+        }
     };
 
     const onSubmit = async (values: FormValues) => {
@@ -367,19 +406,18 @@ export default function RegisterPage() {
                                         <CalendarIcon className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                                         <Input
                                             id="dob"
-                                            type="date"
-                                            className="pl-9 h-11"
-                                            max={`${new Date().getFullYear() - 16}-12-31`}
-                                            min="1950-01-01"
-                                            value={dob ? dob.toISOString().split('T')[0] : ''}
-                                            onChange={(e) =>
-                                                e.target.value
-                                                    ? setDob(new Date(e.target.value))
-                                                    : setDob(undefined)
-                                            }
+                                            type="text"
+                                            inputMode="numeric"
+                                            placeholder="DD.MM.YYYY"
+                                            className="pl-9 h-11 transition-all"
+                                            value={dobInput}
+                                            onChange={handleDobChange}
                                         />
                                     </div>
-                                    {!dob && form.formState.isSubmitted && (
+                                    {!dob && dobInput.length === 10 && (
+                                        <p className="text-xs text-amber-500">Please enter a valid date (min age 16)</p>
+                                    )}
+                                    {!dob && form.formState.isSubmitted && dobInput.length !== 10 && (
                                         <p className="text-xs text-destructive">Date of birth is required</p>
                                     )}
                                 </div>

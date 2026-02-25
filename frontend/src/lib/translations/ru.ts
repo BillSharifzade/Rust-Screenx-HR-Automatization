@@ -460,6 +460,10 @@ export const ru = {
             no_description: "Описание отсутствует",
             shuffle_questions: "Перемешать вопросы",
             show_results: "Показывать результаты сразу",
+            types: {
+                question_based: "Тесты",
+                presentation: "Презентации"
+            }
         },
         vacancies: {
             title: "Вакансии",
@@ -479,8 +483,9 @@ export const ru = {
             attempts: "Попытки"
         },
         notifications: {
-            new_candidates: "Новые кандидаты: {count}",
-            last_candidate: "Последний: {name}",
+            new_candidate_single: "Зарегистрировался новый кандидат!",
+            new_candidates_multiple: "Новые кандидаты: {count}",
+            last_candidate: "Имя: {name}",
             test_updates: "Обновления: {count} тестов завершено",
             check_attempts: "Проверьте страницу попыток.",
         }

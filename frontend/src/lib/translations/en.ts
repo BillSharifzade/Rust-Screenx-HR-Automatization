@@ -460,6 +460,10 @@ export const en = {
             no_description: "No description",
             shuffle_questions: "Shuffle Questions",
             show_results: "Show Results Immediately",
+            types: {
+                question_based: "Tests",
+                presentation: "Presentations"
+            }
         },
         vacancies: {
             title: "Vacancies",
@@ -479,8 +483,9 @@ export const en = {
             attempts: "Attempts"
         },
         notifications: {
-            new_candidates: "New Candidates: {count}",
-            last_candidate: "Last: {name}",
+            new_candidate_single: "New candidate registered!",
+            new_candidates_multiple: "{count} new candidates registered!",
+            last_candidate: "Name: {name}",
             test_updates: "Updates: {count} tests completed/updated",
             check_attempts: "Check the attempts page.",
         }

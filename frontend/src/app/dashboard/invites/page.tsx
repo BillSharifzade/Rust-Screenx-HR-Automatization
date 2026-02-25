@@ -9,10 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, SelectSeparator } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { User, Mail, AtSign, X, Send, Clock, CheckCircle2, XCircle, FileText, Users, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { User, Mail, AtSign, X, Send, Clock, CheckCircle2, XCircle, FileText, Users, Trash2, Loader2, AlertCircle, MonitorPlay, ClipboardCheck } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n-context';
 import {
     AlertDialog,
@@ -354,11 +354,40 @@ function InvitesPageContent() {
                                             <SelectValue placeholder={t('dashboard.invites.create.select_test_placeholder')} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {allTests.map((test: Test) => (
-                                                <SelectItem key={test.id} value={test.id}>
-                                                    {test.title}
-                                                </SelectItem>
-                                            ))}
+                                            {/* Standard Tests Group */}
+                                            {allTests.filter(t => !t.test_type || t.test_type === 'question_based').length > 0 && (
+                                                <SelectGroup>
+                                                    <SelectLabel className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground/80 py-2 pin-0">
+                                                        <ClipboardCheck className="h-3 w-3 text-emerald-500/70" />
+                                                        {t('dashboard.tests.types.question_based')}
+                                                    </SelectLabel>
+                                                    {allTests
+                                                        .filter(t => !t.test_type || t.test_type === 'question_based')
+                                                        .sort((a, b) => a.title.localeCompare(b.title))
+                                                        .map((test: Test) => (
+                                                            <SelectItem key={test.id} value={test.id}>
+                                                                {test.title}
+                                                            </SelectItem>
+                                                        ))}
+                                                </SelectGroup>
+                                            )}
+
+                                            {allTests.filter(t => t.test_type === 'presentation').length > 0 && (
+                                                <SelectGroup className="mt-1">
+                                                    <SelectLabel className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground/80 py-2 border-t pt-3">
+                                                        <MonitorPlay className="h-3 w-3 text-blue-500/70" />
+                                                        {t('dashboard.tests.types.presentation')}
+                                                    </SelectLabel>
+                                                    {allTests
+                                                        .filter(t => t.test_type === 'presentation')
+                                                        .sort((a, b) => a.title.localeCompare(b.title))
+                                                        .map((test: Test) => (
+                                                            <SelectItem key={test.id} value={test.id}>
+                                                                {test.title}
+                                                            </SelectItem>
+                                                        ))}
+                                                </SelectGroup>
+                                            )}
                                         </SelectContent>
                                     </Select>
                                 )}

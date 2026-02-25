@@ -197,12 +197,11 @@ pub async fn create_test_invite(
                 .and_then(|t| t.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            let deadline_hours = test.duration_minutes / 60;
             format!(
                 "Вам назначена презентация: {}\n\nКоличество тем: {}\nСрок выполнения: {} часов\n\nНажмите кнопку ниже, чтобы просмотреть задание.",
                 test.title,
                 themes_count,
-                deadline_hours
+                payload.expires_in_hours
             )
         } else {
             format!(
