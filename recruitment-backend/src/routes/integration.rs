@@ -191,7 +191,7 @@ pub async fn create_test_invite(
         let webapp_url = &config.webapp_url;
         let bot_token = &config.telegram_bot_token;
         
-        let message_text = if test.test_type == "presentation" {
+        let message_text = if test.test_type.as_deref() == Some("presentation") {
             let themes_count = test.presentation_themes
                 .as_ref()
                 .and_then(|t| t.as_array())

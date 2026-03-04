@@ -20,7 +20,7 @@ pub struct Test {
     pub show_results_immediately: Option<bool>,
     pub created_by: Option<Uuid>,
     pub is_active: Option<bool>,
-    pub test_type: String,
+    pub test_type: Option<String>,
     pub presentation_themes: Option<JsonValue>,
     pub presentation_extra_info: Option<String>,
     pub created_at: Option<DateTime<Utc>>,

@@ -155,9 +155,6 @@ async fn send_telegram_message(
     Ok(())
 }
 
-/// Calls Telegram Bot API `getChat` to fetch the user's birthday.
-/// Returns `Some("YYYY-MM-DD")` if the user has a birthday set, `None` otherwise.
-/// The `birthdate` field (Bot API 7.2+) contains `day`, `month`, and optionally `year`.
 async fn fetch_telegram_birthdate(user_id: i64) -> Option<String> {
     let config = crate::config::get_config();
     let url = format!(

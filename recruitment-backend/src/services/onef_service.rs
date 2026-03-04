@@ -49,22 +49,31 @@ pub struct OneFWebhookResponse {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OneFTestStatusPayload {
-    pub event_type: String,
-    pub attempt_id: uuid::Uuid,
-    pub candidate_id: uuid::Uuid,
-    pub test_id: uuid::Uuid,
-    pub status: String,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OneFTestStatusEventData {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub score: Option<f64>,
+    pub attempt_id: Option<uuid::Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percentage: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub passed: Option<bool>,
-    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OneFTestStatusPayload {
+    pub candidate_id: uuid::Uuid,
+    pub test_id: uuid::Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vacancy_id: Option<i64>,
+    pub test_status: String,
+    pub event_date: String,
+    pub event_data: OneFTestStatusEventData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,10 +259,7 @@ impl OneFService {
         telegram_id: i64,
         text: &str,
     ) -> Result<(), String> {
-        let webhook_url = match &self.webhook_url {
-            Some(url) => url,
-            None => return Ok(()),
-        };
+        let endpoint_url = "http://192.168.1.47/app/v1.2/api/publications/action/receivemessage";
 
         let payload = json!({
             "event_type": "new_message",
@@ -267,9 +273,9 @@ impl OneFService {
             "requestBody": payload
         });
 
-        info!("Forwarding new message from candidate {} into 1F webhook", candidate_id);
+        info!("Forwarding new message from candidate {} into 1F receivemessage endpoint", candidate_id);
 
-        let response = self.client.post(webhook_url)
+        let response = self.client.post(endpoint_url)
             .json(&wrapper)
             .send()
             .await
@@ -286,21 +292,18 @@ impl OneFService {
         &self,
         payload: OneFTestStatusPayload,
     ) -> Result<(), String> {
-        let webhook_url = match &self.webhook_url {
-            Some(url) => url,
-            None => return Ok(()),
-        };
+        let endpoint_url = "http://192.168.1.47/app/v1.2/api/publications/action/postTestStatus";
 
         let wrapper = json!({
             "requestBody": payload
         });
 
         info!(
-            "Pushing test status update to 1F: attempt {} status {}",
-            payload.attempt_id, payload.status
+            "Pushing test status update to 1F: candidate {} status {}",
+            payload.candidate_id, payload.test_status
         );
 
-        let response = self.client.post(webhook_url)
+        let response = self.client.post(endpoint_url)
             .json(&wrapper)
             .send()
             .await

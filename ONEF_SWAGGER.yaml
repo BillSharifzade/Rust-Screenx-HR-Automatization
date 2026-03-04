@@ -4,10 +4,10 @@ info:
   description: Internal API for OneF (1F) ERP to communicate with the Recruitment Platform.
   version: 1.2.0
 servers:
-  - url: http://10.10.10.25:8888/api/onef
-    description: Production Server
-  - url: http://localhost:8080/api/onef
-    description: Local Development Server
+  - url: http://192.168.1.47/app/v1.2/api/publications
+    description: OneF Internal Server
+  - url: http://10.10.10.25:8888/app/v1.2/api/publications
+    description: OneF External/VPN Server
 
 paths:
   /dashboard:
@@ -143,7 +143,7 @@ paths:
                   items:
                     type: array
                     items:
-                      type: object # Attempt object
+                      $ref: '#/components/schemas/OneFAttempt' # Attempt object
                   total:
                     type: integer
 
@@ -266,6 +266,49 @@ paths:
                   test_title:
                     type: string
 
+    OneFAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        test_id:
+          type: string
+          format: uuid
+        candidate_name:
+          type: string
+        candidate_email:
+          type: string
+        status:
+          type: string
+        score:
+          type: number
+          nullable: true
+        max_score:
+          type: number
+          nullable: true
+        percentage:
+          type: number
+          nullable: true
+        passed:
+          type: boolean
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        time_spent_seconds:
+          type: integer
+          nullable: true
+        result_url:
+          type: string
+          nullable: true
+          description: "URL to the test result report (TXT for simple tests or combined link/file for presentations)"
+
   /attempts_filter:
     get:
       summary: Filter Test Attempts
@@ -302,7 +345,7 @@ paths:
                   items:
                     type: array
                     items:
-                      type: object
+                      $ref: '#/components/schemas/OneFAttempt'
                   total:
                     type: integer
                   page:
@@ -348,7 +391,7 @@ paths:
                 type: object
                 properties:
                   attempt:
-                    type: object
+                    $ref: '#/components/schemas/OneFAttempt'
                   test_title:
                     type: string
                   test_type:
@@ -477,6 +520,59 @@ paths:
                       type: string
                     label:
                       type: string
+
+  # OneF Endpoint that Recruitment Platform calls
+  /action/postTestStatus:
+    post:
+      summary: "[Webhook] OneF Test Status Receiver"
+      description: "Recruitment Platform calls this endpoint on OneF side whenever a test attempt is started or completed."
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestBody:
+                   $ref: '#/components/schemas/OneFTestStatusPayload'
+      responses:
+        '200':
+          description: OK
+
+  /action/receivemessage:
+    post:
+      summary: "[Webhook] OneF Inbound Message Receiver"
+      description: "Recruitment Platform calls this when a candidate sends a message via Telegram. These messages appear in the OneF chat."
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestBody:
+                   type: object
+                   properties:
+                     event_type:
+                       type: string
+                       example: "new_message"
+                     candidate_id:
+                       type: string
+                       format: uuid
+                     telegram_id:
+                       type: integer
+                     text:
+                       type: string
+                     received_at:
+                       type: string
+                       format: date-time
+      responses:
+        '200':
+          description: OK
 
 components:
   schemas:
@@ -742,3 +838,53 @@ components:
         schedule:
           type: string
           nullable: true
+
+    OneFTestStatusPayload:
+      type: object
+      required:
+        - candidate_id
+        - test_id
+        - test_status
+        - event_date
+        - event_data
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+        test_id:
+          type: string
+          format: uuid
+        vacancy_id:
+          type: integer
+        test_status:
+          type: string
+          enum: [in_progress, completed, passed, failed, needs_review]
+        event_date:
+          type: string
+          format: date-time
+        event_data:
+          $ref: '#/components/schemas/OneFTestStatusEventData'
+
+    OneFTestStatusEventData:
+      type: object
+      properties:
+        attempt_id:
+          type: string
+          format: uuid
+          nullable: true
+        user_score:
+          type: number
+          nullable: true
+        max_score:
+          type: number
+          nullable: true
+        percentage:
+          type: number
+          nullable: true
+        passed:
+          type: boolean
+          nullable: true
+        result_url:
+          type: string
+          nullable: true
+          description: "Full URL to results or combined presentation info"

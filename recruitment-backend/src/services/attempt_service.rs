@@ -61,7 +61,7 @@ impl AttemptService {
         let expires_at: DateTime<Utc> = Utc::now() + Duration::hours(expires_in_hours);
 
         let mut questions_snapshot = test.questions.clone();
-        if test.test_type == "presentation" {
+        if test.test_type.as_deref() == Some("presentation") {
             questions_snapshot = json!({
                 "test_type": "presentation",
                 "themes": test.presentation_themes,

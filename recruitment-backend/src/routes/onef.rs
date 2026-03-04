@@ -410,7 +410,7 @@ pub async fn list_tests(
             id: t.id,
             title: t.title,
             description: t.description,
-            test_type: t.test_type,
+            test_type: t.test_type.unwrap_or_else(|| "question_based".to_string()),
             duration_minutes: t.duration_minutes,
             passing_score: t.passing_score.to_f64().unwrap_or(0.0),
             is_active: t.is_active.unwrap_or(true),
@@ -462,7 +462,7 @@ pub async fn create_test_invite(
         .ok_or_else(|| crate::error::Error::NotFound("Candidate not found".into()))?;
     let test = state.test_service.get_test_by_id(payload.test_id).await?;
     let expires_in_hours = payload.expires_in_hours.unwrap_or_else(|| {
-        if test.duration_minutes > 0 && test.test_type == "presentation" {
+        if test.duration_minutes > 0 && test.test_type.as_deref() == Some("presentation") {
             (test.duration_minutes / 60) as i64
         } else {
             48
@@ -487,7 +487,7 @@ pub async fn create_test_invite(
         let webapp_url = &config.webapp_url;
         let bot_token = &config.telegram_bot_token;
 
-        let message_text = if test.test_type == "presentation" {
+        let message_text = if test.test_type.as_deref() == Some("presentation") {
             let themes_count = test.presentation_themes
                 .as_ref()
                 .and_then(|t| t.as_array())

@@ -45,7 +45,7 @@ pub async fn get_test_by_token(
             duration_minutes: test.duration_minutes,
             total_questions: questions.len(),
             passing_score: test.passing_score.to_string().parse::<f64>().unwrap_or(0.0),
-            test_type: Some(test.test_type),
+            test_type: test.test_type,
             presentation_themes: test.presentation_themes,
             presentation_extra_info: test.presentation_extra_info,
         },
@@ -103,16 +103,19 @@ pub async fn start_test(
             tokio::spawn(async move {
                 if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
                     let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
-                        event_type: "test_status_changed".to_string(),
-                        attempt_id,
                         candidate_id: candidate.id,
                         test_id,
-                        status,
-                        score: None,
-                        max_score: None,
-                        percentage: None,
-                        passed: None,
-                        updated_at: Utc::now().to_rfc3339(),
+                        vacancy_id: candidate.vacancy_id,
+                        test_status: status,
+                        event_date: Utc::now().to_rfc3339(),
+                        event_data: crate::services::onef_service::OneFTestStatusEventData {
+                            attempt_id: Some(attempt_id),
+                            max_score: None,
+                            user_score: None,
+                            percentage: None,
+                            passed: None,
+                            result_url: None,
+                        },
                     }).await;
                 }
             });
@@ -272,6 +275,47 @@ pub async fn submit_presentation(
             "has_file": attempt.presentation_submission_file_path.is_some(),
         });
         let _ = notif.enqueue_webhook("presentation_submitted", &completed).await;
+
+        let onef = state.onef_service.clone();
+        let cand_svc = state.candidate_service.clone();
+        let attempt_id = attempt.id;
+        let test_id = attempt.test_id;
+        let status = attempt.status.clone();
+        let email = attempt.candidate_email.clone();
+        let config = crate::config::get_config();
+
+        let mut result_urls = Vec::new();
+        if let Some(ref link) = attempt.presentation_submission_link {
+            result_urls.push(format!("Link: {}", link));
+        }
+        if let Some(ref path) = attempt.presentation_submission_file_path {
+            result_urls.push(format!("File: {}/{}", config.webapp_url, path));
+        }
+        let result_url = if result_urls.is_empty() {
+            None
+        } else {
+            Some(result_urls.join(" | "))
+        };
+
+        tokio::spawn(async move {
+            if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
+                    candidate_id: candidate.id,
+                    test_id,
+                    vacancy_id: candidate.vacancy_id,
+                    test_status: status,
+                    event_date: Utc::now().to_rfc3339(),
+                    event_data: crate::services::onef_service::OneFTestStatusEventData {
+                        attempt_id: Some(attempt_id),
+                        max_score: None,
+                        user_score: None,
+                        percentage: None,
+                        passed: None,
+                        result_url,
+                    },
+                }).await;
+            }
+        });
     }
 
     Ok(Json(json!({ 
@@ -355,19 +399,82 @@ pub async fn submit_test(
             let max_score_f = max_score as f64;
             let pct_f = percentage as f64;
 
+            let config = crate::config::get_config();
+            
+            let mut report = format!("Test Results for: {}\n", attempt.candidate_name);
+            report.push_str(&format!("Score: {}/{} ({}%)\n\n", score, max_score, percentage));
+            let questions: Vec<crate::models::question::Question> = serde_json::from_value(test.questions.clone()).unwrap_or_default();
+            let graded_answers: Vec<serde_json::Value> = attempt.graded_answers.clone().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            
+            for (i, q) in questions.iter().enumerate() {
+                report.push_str(&format!("{}. {}\n", i + 1, q.question));
+                
+                let ga = graded_answers.iter().find(|a| a.get("question_id").and_then(|id| id.as_i64()) == Some(q.id as i64));
+                if let crate::models::question::QuestionDetails::MultipleChoice(mc) = &q.details {
+                    let user_ans_str = ga.and_then(|ans| ans.get("candidate_answer").and_then(|a| a.as_str()));
+                    
+                    for (opt_idx, opt) in mc.options.iter().enumerate() {
+                        let is_correct = opt_idx as i32 == mc.correct_answer;
+                        let is_user_pick = user_ans_str == Some(opt.as_str());
+                        
+                        let marker = match (is_correct, is_user_pick) {
+                            (true, true) => " [✓] [Correct]",
+                            (true, false) => " [Correct]",
+                            (false, true) => " [✗] [Your Answer]",
+                            _ => "",
+                        };
+                        report.push_str(&format!("   - {}{}\n", opt, marker));
+                    }
+                } else if let Some(ans) = ga {
+                    let user_ans_val = ans.get("candidate_answer");
+                    if let Some(user_ans) = user_ans_val.and_then(|a| a.as_str()) {
+                        report.push_str(&format!("User Answer: {}\n", user_ans));
+                    } else if let Some(user_ans) = user_ans_val.and_then(|a| a.as_i64()) {
+                        report.push_str(&format!("User Answer: {}\n", user_ans));
+                    } else if let Some(user_ans) = user_ans_val.and_then(|a| a.as_array()) {
+                        let strings: Vec<String> = user_ans.iter().filter_map(|x| x.as_i64().map(|y| y.to_string())).collect();
+                        report.push_str(&format!("User Answer: [{}]\n", strings.join(", ")));
+                    } else if user_ans_val.map(|v| v.is_null()).unwrap_or(true) {
+                        report.push_str("User Answer: Not answered\n");
+                    } else {
+                        report.push_str(&format!("User Answer: {}\n", user_ans_val.unwrap()));
+                    }
+                } else {
+                    report.push_str("User Answer: Not answered\n");
+                }
+
+                if let Some(ans) = ga {
+                    let pts = ans.get("points_earned").and_then(|p| p.as_i64()).unwrap_or(0);
+                    let m_pts = ans.get("max_points").and_then(|p| p.as_i64()).unwrap_or(0);
+                    report.push_str(&format!("Score: {}/{}\n", pts, m_pts));
+                }
+                report.push_str("\n");
+            }
+            
+            let upload_dir = "uploads/results";
+            let _ = tokio::fs::create_dir_all(upload_dir).await;
+            let result_filename = format!("{}.txt", attempt_id);
+            let result_path = format!("{}/{}", upload_dir, result_filename);
+            let _ = tokio::fs::write(&result_path, report).await;
+            
+            let result_url = Some(format!("{}/{}", config.webapp_url, result_path));
+
             tokio::spawn(async move {
                 if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
                     let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
-                        event_type: "test_status_changed".to_string(),
-                        attempt_id,
                         candidate_id: candidate.id,
                         test_id,
-                        status,
-                        score: Some(score_f),
-                        max_score: Some(max_score_f),
-                        percentage: Some(pct_f),
-                        passed: Some(passed),
-                        updated_at: Utc::now().to_rfc3339(),
+                        vacancy_id: candidate.vacancy_id,
+                        test_status: status,
+                        event_date: Utc::now().to_rfc3339(),
+                        event_data: crate::services::onef_service::OneFTestStatusEventData {
+                            attempt_id: Some(attempt_id),
+                            user_score: Some(score_f),
+                            max_score: Some(max_score_f),
+                            percentage: Some(pct_f),
+                            passed: Some(passed),
+                            result_url,
+                        },
                     }).await;
                 }
             });
