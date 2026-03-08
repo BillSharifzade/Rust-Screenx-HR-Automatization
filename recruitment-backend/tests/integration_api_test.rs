@@ -150,9 +150,10 @@ async fn integration_api_end_to_end() {
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
+    let unique_email = format!("alice_{}@example.com", Uuid::new_v4());
     let invite_body = json!({
         "test_id": test_id,
-        "candidate": {"external_id": null, "name": "Alice", "email": "alice@example.com", "telegram_id": null, "phone": null},
+        "candidate": {"external_id": null, "name": "Alice", "email": unique_email, "telegram_id": null, "phone": null},
         "expires_in_hours": 2,
         "send_notification": false,
         "notification_method": null,

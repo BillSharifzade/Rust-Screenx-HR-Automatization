@@ -99,13 +99,28 @@ pub async fn start_test(
             let test_id = updated.test_id;
             let status = updated.status.clone();
             let email = updated.candidate_email.clone();
+            let attempt_metadata = updated.metadata.clone();
 
             tokio::spawn(async move {
                 if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                    let mut final_vacancy_id = attempt_metadata.as_ref()
+                        .and_then(|m| m.get("vacancy_id").and_then(|v| v.as_i64()));
+                    
+                    if final_vacancy_id.is_none() {
+                        if let Ok(apps) = cand_svc.get_candidate_applications(candidate.id).await {
+                            if let Some(first_app) = apps.first() {
+                                final_vacancy_id = Some(first_app.vacancy_id);
+                            }
+                        }
+                    }
+                    if final_vacancy_id.is_none() {
+                        final_vacancy_id = candidate.vacancy_id;
+                    }
+
                     let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
                         candidate_id: candidate.id,
                         test_id,
-                        vacancy_id: candidate.vacancy_id,
+                        vacancy_id: final_vacancy_id,
                         test_status: status,
                         event_date: Utc::now().to_rfc3339(),
                         event_data: crate::services::onef_service::OneFTestStatusEventData {
@@ -296,13 +311,28 @@ pub async fn submit_presentation(
         } else {
             Some(result_urls.join(" | "))
         };
+        let attempt_metadata = attempt.metadata.clone();
 
         tokio::spawn(async move {
             if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                let mut final_vacancy_id = attempt_metadata.as_ref()
+                    .and_then(|m| m.get("vacancy_id").and_then(|v| v.as_i64()));
+                
+                if final_vacancy_id.is_none() {
+                    if let Ok(apps) = cand_svc.get_candidate_applications(candidate.id).await {
+                        if let Some(first_app) = apps.first() {
+                            final_vacancy_id = Some(first_app.vacancy_id);
+                        }
+                    }
+                }
+                if final_vacancy_id.is_none() {
+                    final_vacancy_id = candidate.vacancy_id;
+                }
+
                 let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
                     candidate_id: candidate.id,
                     test_id,
-                    vacancy_id: candidate.vacancy_id,
+                    vacancy_id: final_vacancy_id,
                     test_status: status,
                     event_date: Utc::now().to_rfc3339(),
                     event_data: crate::services::onef_service::OneFTestStatusEventData {
@@ -458,13 +488,28 @@ pub async fn submit_test(
             let _ = tokio::fs::write(&result_path, report).await;
             
             let result_url = Some(format!("{}/{}", config.webapp_url, result_path));
+            let attempt_metadata = attempt.metadata.clone();
 
             tokio::spawn(async move {
                 if let Ok(Some(candidate)) = cand_svc.get_by_email(&email).await {
+                    let mut final_vacancy_id = attempt_metadata.as_ref()
+                        .and_then(|m| m.get("vacancy_id").and_then(|v| v.as_i64()));
+                    
+                    if final_vacancy_id.is_none() {
+                        if let Ok(apps) = cand_svc.get_candidate_applications(candidate.id).await {
+                            if let Some(first_app) = apps.first() {
+                                final_vacancy_id = Some(first_app.vacancy_id);
+                            }
+                        }
+                    }
+                    if final_vacancy_id.is_none() {
+                        final_vacancy_id = candidate.vacancy_id;
+                    }
+
                     let _ = onef.notify_test_status(crate::services::onef_service::OneFTestStatusPayload {
                         candidate_id: candidate.id,
                         test_id,
-                        vacancy_id: candidate.vacancy_id,
+                        vacancy_id: final_vacancy_id,
                         test_status: status,
                         event_date: Utc::now().to_rfc3339(),
                         event_data: crate::services::onef_service::OneFTestStatusEventData {

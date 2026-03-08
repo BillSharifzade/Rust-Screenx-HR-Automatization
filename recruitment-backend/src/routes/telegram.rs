@@ -168,14 +168,11 @@ async fn fetch_telegram_birthdate(user_id: i64) -> Option<String> {
     let birthdate = json.get("result")?.get("birthdate")?;
     let day = birthdate.get("day")?.as_u64()?;
     let month = birthdate.get("month")?.as_u64()?;
-
-    // `year` is optional in Telegram's API — some users only set day+month
     let year = birthdate.get("year").and_then(|y| y.as_u64());
 
     if let Some(y) = year {
         Some(format!("{:04}-{:02}-{:02}", y, month, day))
     } else {
-        // Without a year we can't use it as a full DOB — skip
         tracing::info!("User {} has birthday day/month but no year, skipping DOB auto-fill", user_id);
         None
     }

@@ -2,6 +2,21 @@ use crate::error::Result;
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 
+fn strip_html_tags(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for c in input.chars() {
+        if c == '<' {
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            output.push(c);
+        }
+    }
+    output.trim().to_string()
+}
+
 fn deserialize_bool_flexible<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
 where
     D: Deserializer<'de>,
@@ -66,9 +81,14 @@ impl KoinotinavService {
             .get(&url)
             .send()
             .await?;
-        let vacancies = response
+        let mut vacancies = response
             .json::<Vec<ExternalVacancy>>()
             .await?;
+            
+        for v in &mut vacancies {
+            v.title = strip_html_tags(&v.title);
+        }
+            
         Ok(vacancies.into_iter().filter(|v| v.id >= 137).collect())
     }
 
@@ -90,7 +110,10 @@ impl KoinotinavService {
 
             if content_type.contains("application/json") {
                 match response.json::<ExternalVacancy>().await {
-                    Ok(v) => return Ok(Some(v)),
+                    Ok(mut v) => {
+                        v.title = strip_html_tags(&v.title);
+                        return Ok(Some(v));
+                    },
                     Err(e) => tracing::warn!("Failed to parse single vacancy JSON: {}. Falling back to list.", e),
                 }
             } else {

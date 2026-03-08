@@ -82,13 +82,14 @@ async fn public_flow_end_to_end() {
 
     let attempt_service =
         recruitment_backend::services::attempt_service::AttemptService::new(pool.clone());
+    let unique_email = format!("alice_{}@example.com", Uuid::new_v4());
     let invite = attempt_service
         .create_invite(
             test.id,
             recruitment_backend::services::attempt_service::InviteCandidate {
                 external_id: None,
                 name: "Alice".into(),
-                email: "alice@example.com".into(),
+                email: unique_email,
                 telegram_id: None,
                 phone: None,
             },

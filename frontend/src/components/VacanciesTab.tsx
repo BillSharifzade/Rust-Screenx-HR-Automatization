@@ -129,10 +129,9 @@ export function VacanciesTab({ onSelectVacancy, selectButtonText }: VacanciesTab
                                             </Badge>
                                         )}
                                     </div>
-                                    <div
-                                        className="font-bold leading-tight line-clamp-2 text-base group-hover:text-primary transition-colors"
-                                        dangerouslySetInnerHTML={{ __html: vacancy.title }}
-                                    />
+                                    <div className="font-bold leading-tight line-clamp-2 text-base group-hover:text-primary transition-colors">
+                                        {vacancy.title}
+                                    </div>
                                     <div className="flex items-center gap-2 opacity-70 text-xs text-muted-foreground justify-between pt-1">
                                         <div className="flex items-center gap-1.5">
                                             <MapPin className="h-3 w-3 shrink-0" />
@@ -165,10 +164,9 @@ export function VacanciesTab({ onSelectVacancy, selectButtonText }: VacanciesTab
                                                 </>
                                             )}
                                         </div>
-                                        <DialogTitle
-                                            className="text-xl mt-2 select-text"
-                                            dangerouslySetInnerHTML={{ __html: selectedVacancy.title }}
-                                        />
+                                        <DialogTitle className="text-xl mt-2 select-text">
+                                            {selectedVacancy.title}
+                                        </DialogTitle>
                                         <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
                                             <span className="flex items-center gap-1.5">
                                                 <MapPin className="h-3 w-3" /> {selectedVacancy.city}
@@ -196,7 +194,7 @@ export function VacanciesTab({ onSelectVacancy, selectButtonText }: VacanciesTab
                         </>
                     )}
                 </DialogContent>
-            </Dialog>
-        </div>
+            </Dialog >
+        </div >
     )
 }

@@ -714,6 +714,11 @@ components:
           type: integer
           description: Expiration time in hours. Defaults to 48 for tests, or calculated for presentations if duration is set.
           default: 48
+        vacancy_id:
+          type: integer
+          nullable: true
+          description: Optional vacancy ID. Useful for associating this test attempt with a specific application.
+
 
 
     OneFVacancyResponse:

@@ -28,6 +28,7 @@ pub struct OneFCreateInviteRequest {
     pub candidate_id: Uuid,
     pub test_id: Uuid,
     pub expires_in_hours: Option<i64>,
+    pub vacancy_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -480,7 +481,7 @@ pub async fn create_test_invite(
             phone: candidate.phone.clone(),
         },
         expires_in_hours,
-        Some(json!({ "source": "onef" })),
+        Some(json!({ "source": "onef", "vacancy_id": payload.vacancy_id })),
     ).await?;
     if let Some(telegram_id) = candidate.telegram_id {
         let config = crate::config::get_config();
