@@ -52,7 +52,7 @@ impl AppState {
         let vacancy_service = VacancyService::new(pool.clone());
         let candidate_service = CandidateService::new(pool.clone());
         let koinotinav_service = KoinotinavService::new();
-        let onef_service = OneFService::new(config.onef_webhook_url.clone());
+        let onef_service = OneFService::new(config.onef_base_urls.clone());
         let message_service = MessageService::new(pool.clone());
         let attempt_service = AttemptService::new(pool.clone());
 

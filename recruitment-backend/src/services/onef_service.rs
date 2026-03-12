@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn, error};
 
+// ───────────────────────── Payload types ─────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFRequestWrapper {
     #[serde(rename = "requestBody")]
@@ -84,33 +86,47 @@ pub struct OneFCandidateStatusPayload {
     pub updated_at: String,
 }
 
+// ───────────────────────── Well-known paths ─────────────────────────
+
+/// Path appended to base URL for receiving test status updates.
+const PATH_POST_TEST_STATUS: &str = "/action/postTestStatus";
+
+/// Path appended to base URL for receiving inbound messages.
+const PATH_RECEIVE_MESSAGE: &str = "/action/receivemessage";
+
+// ───────────────────────── Service ─────────────────────────
+
 #[derive(Clone)]
 pub struct OneFService {
     client: Client,
-    webhook_url: Option<String>,
+    /// One or more OneF base URLs (e.g. `http://192.168.1.47/app/v1.2/api/publications`).
+    /// The service fans out every notification to **all** configured URLs concurrently.
+    base_urls: Vec<String>,
 }
 
 impl OneFService {
-    pub fn new(webhook_url: Option<String>) -> Self {
+    pub fn new(base_urls: Vec<String>) -> Self {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("Failed to create HTTP client for 1F service");
-        
-        let webhook_url = webhook_url.filter(|url| !url.trim().is_empty());
 
-        if let Some(ref url) = webhook_url {
-            info!("1F integration enabled, webhook URL: {}", url);
+        if base_urls.is_empty() {
+            info!("1F integration disabled (no ONEF_BASE_URLS / ONEF_WEBHOOK_URL configured)");
         } else {
-            info!("1F integration disabled (ONEF_WEBHOOK_URL not set or empty)");
+            for url in &base_urls {
+                info!("1F integration enabled, base URL: {}", url);
+            }
         }
-        
-        Self { client, webhook_url }
+
+        Self { client, base_urls }
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.webhook_url.is_some()
+        !self.base_urls.is_empty()
     }
+
+    // ─────────────── notify_application ───────────────
 
     pub async fn notify_application(
         &self,
@@ -126,12 +142,9 @@ impl OneFService {
         ai_rating: Option<i32>,
         ai_comment: Option<String>,
     ) -> Result<(), String> {
-        let webhook_url = match &self.webhook_url {
-            Some(url) => url,
-            None => {
-                return Ok(());
-            }
-        };
+        if self.base_urls.is_empty() {
+            return Ok(());
+        }
 
         let fullname = name.trim().to_string();
         let name_parts: Vec<&str> = fullname.split_whitespace().collect();
@@ -175,46 +188,27 @@ impl OneFService {
         };
 
         info!(
-            "Sending application to 1F: candidate {} applied for vacancy {}",
-            candidate_id, vacancy_id
+            "Sending application to 1F: candidate {} applied for vacancy {} → {} target(s)",
+            candidate_id, vacancy_id, self.base_urls.len()
         );
 
-        match self.send_webhook(&webhook_url, &wrapper).await {
-            Ok(response) => {
-                if response.success {
-                    info!(
-                        "1F webhook successful for candidate {} vacancy {}",
-                        candidate_id, vacancy_id
-                    );
-                } else {
-                    warn!(
-                        "1F webhook returned failure for candidate {} vacancy {}: {:?}",
-                        candidate_id, vacancy_id, response.message
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                error!(
-                    "Failed to send 1F webhook for candidate {} vacancy {}: {}",
-                    candidate_id, vacancy_id, e
-                );
-                Err(e)
-            }
-        }
+        let body = serde_json::to_value(&wrapper)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+
+        self.fan_out_post(&self.base_urls, &body, "new_application").await;
+        Ok(())
     }
+
+    // ─────────────── notify_grade ───────────────
 
     pub async fn notify_grade(
         &self,
         candidate_id: uuid::Uuid,
         grade: i32,
     ) -> Result<(), String> {
-        let webhook_url = match &self.webhook_url {
-            Some(url) => url,
-            None => {
-                return Ok(());
-            }
-        };
+        if self.base_urls.is_empty() {
+            return Ok(());
+        }
 
         let payload = json!({
             "event_type": "grade_shared",
@@ -228,30 +222,15 @@ impl OneFService {
         });
 
         info!(
-            "Sharing grade to 1F: candidate {} grade {}",
-            candidate_id, grade
+            "Sharing grade to 1F: candidate {} grade {} → {} target(s)",
+            candidate_id, grade, self.base_urls.len()
         );
 
-        let response = self
-            .client
-            .post(webhook_url)
-            .json(&wrapper)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        let status = response.status();
-        
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            error!("1F grade sharing failed with status {}: {}", status, body);
-            return Err(format!("HTTP error {}: {}", status, body));
-        }
-
-        info!("Successfully shared grade to 1F for candidate {}", candidate_id);
-        info!("Successfully shared grade to 1F for candidate {}", candidate_id);
+        self.fan_out_post(&self.base_urls, &wrapper, "grade_shared").await;
         Ok(())
     }
+
+    // ─────────────── notify_new_message ───────────────
 
     pub async fn notify_new_message(
         &self,
@@ -259,7 +238,13 @@ impl OneFService {
         telegram_id: i64,
         text: &str,
     ) -> Result<(), String> {
-        let endpoint_url = "http://192.168.1.47/app/v1.2/api/publications/action/receivemessage";
+        if self.base_urls.is_empty() {
+            return Ok(());
+        }
+
+        let urls: Vec<String> = self.base_urls.iter()
+            .map(|base| format!("{}{}", base, PATH_RECEIVE_MESSAGE))
+            .collect();
 
         let payload = json!({
             "event_type": "new_message",
@@ -273,59 +258,52 @@ impl OneFService {
             "requestBody": payload
         });
 
-        info!("Forwarding new message from candidate {} into 1F receivemessage endpoint", candidate_id);
+        info!(
+            "Forwarding new message from candidate {} into 1F → {} target(s)",
+            candidate_id, urls.len()
+        );
 
-        let response = self.client.post(endpoint_url)
-            .json(&wrapper)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
-            error!("1F message forwarding failed: {}", body);
-        }
+        self.fan_out_post(&urls, &wrapper, "new_message").await;
         Ok(())
     }
+
+    // ─────────────── notify_test_status ───────────────
 
     pub async fn notify_test_status(
         &self,
         payload: OneFTestStatusPayload,
     ) -> Result<(), String> {
-        let endpoint_url = "http://192.168.1.47/app/v1.2/api/publications/action/postTestStatus";
+        if self.base_urls.is_empty() {
+            return Ok(());
+        }
+
+        let urls: Vec<String> = self.base_urls.iter()
+            .map(|base| format!("{}{}", base, PATH_POST_TEST_STATUS))
+            .collect();
 
         let wrapper = json!({
             "requestBody": payload
         });
 
         info!(
-            "Pushing test status update to 1F: candidate {} status {}",
-            payload.candidate_id, payload.test_status
+            "Pushing test status update to 1F: candidate {} status {} → {} target(s)",
+            payload.candidate_id, payload.test_status, urls.len()
         );
 
-        let response = self.client.post(endpoint_url)
-            .json(&wrapper)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
-            error!("1F test status update failed: {}", body);
-        }
-
+        self.fan_out_post(&urls, &wrapper, "test_status").await;
         Ok(())
     }
+
+    // ─────────────── notify_candidate_status ───────────────
 
     pub async fn notify_candidate_status(
         &self,
         candidate_id: uuid::Uuid,
         status: String,
     ) -> Result<(), String> {
-        let webhook_url = match &self.webhook_url {
-            Some(url) => url,
-            None => return Ok(()),
-        };
+        if self.base_urls.is_empty() {
+            return Ok(());
+        }
 
         let payload = OneFCandidateStatusPayload {
             event_type: "candidate_status_changed".to_string(),
@@ -339,49 +317,86 @@ impl OneFService {
         });
 
         info!(
-            "Pushing candidate status update to 1F: candidate {} status {}",
-            candidate_id, payload.status
+            "Pushing candidate status update to 1F: candidate {} status {} → {} target(s)",
+            candidate_id, payload.status, self.base_urls.len()
         );
 
-        let response = self.client.post(webhook_url)
-            .json(&wrapper)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
-            error!("1F candidate status update failed: {}", body);
-        }
-
+        self.fan_out_post(&self.base_urls, &wrapper, "candidate_status_changed").await;
         Ok(())
     }
 
-    async fn send_webhook(
+    // ───────────────────────── Fan-out core ─────────────────────────
+
+    /// Send a POST request with `body` to **every** URL in `urls` concurrently.
+    /// Each request is independent — a failure to one target does NOT affect
+    /// delivery to the others.  Errors are logged but never propagated.
+    async fn fan_out_post(
+        &self,
+        urls: &[String],
+        body: &serde_json::Value,
+        event_label: &str,
+    ) {
+        if urls.is_empty() {
+            return;
+        }
+
+        // For a single target, skip the overhead of spawning a JoinSet.
+        if urls.len() == 1 {
+            self.post_single(&urls[0], body, event_label).await;
+            return;
+        }
+
+        // Multiple targets — fire concurrently, wait for all.
+        let mut handles = Vec::with_capacity(urls.len());
+        for url in urls {
+            let client = self.client.clone();
+            let url = url.clone();
+            let body = body.clone();
+            let label = event_label.to_string();
+            handles.push(tokio::spawn(async move {
+                Self::post_with_client(&client, &url, &body, &label).await;
+            }));
+        }
+
+        // Wait for all to complete (order doesn't matter).
+        for handle in handles {
+            let _ = handle.await;
+        }
+    }
+
+    /// POST to a single URL using `self.client`.
+    async fn post_single(
         &self,
         url: &str,
-        payload: &OneFRequestWrapper,
-    ) -> Result<OneFWebhookResponse, String> {
-        let response = self
-            .client
-            .post(url)
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+        body: &serde_json::Value,
+        event_label: &str,
+    ) {
+        Self::post_with_client(&self.client, url, body, event_label).await;
+    }
 
-        let status = response.status();
-        
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(format!("HTTP error {}: {}", status, body));
-        }
-        match response.json::<OneFWebhookResponse>().await {
-            Ok(resp) => Ok(resp),
-            Err(_) => Ok(OneFWebhookResponse {
-                success: true,
-                message: Some("Response received but not JSON".to_string()),
-            }),
+    /// Low-level POST helper — logs success/failure.
+    async fn post_with_client(
+        client: &Client,
+        url: &str,
+        body: &serde_json::Value,
+        event_label: &str,
+    ) {
+        match client.post(url).json(body).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    info!("1F {} → {} returned {}", event_label, url, status);
+                } else {
+                    let resp_body = resp.text().await.unwrap_or_default();
+                    warn!(
+                        "1F {} → {} returned {}: {}",
+                        event_label, url, status, resp_body
+                    );
+                }
+            }
+            Err(e) => {
+                error!("1F {} → {} failed: {}", event_label, url, e);
+            }
         }
     }
 }

@@ -16,7 +16,7 @@ pub struct Config {
     pub max_ai_questions: usize,
     pub telegram_bot_token: String,
     pub webapp_url: String,
-    pub onef_webhook_url: Option<String>,
+    pub onef_base_urls: Vec<String>,
 }
 
 pub static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -37,7 +37,7 @@ impl Config {
             max_ai_questions: get_env_parse("MAX_AI_QUESTIONS")?,
             telegram_bot_token: get_env("TELEGRAM_BOT_TOKEN")?,
             webapp_url: get_env("WEBAPP_URL")?,
-            onef_webhook_url: env::var("ONEF_WEBHOOK_URL").ok(),
+            onef_base_urls: parse_onef_base_urls(),
         })
     }
 }
@@ -68,4 +68,36 @@ pub fn get_config() -> &'static Config {
     CONFIG
         .get()
         .expect("Configuration has not been initialized")
+}
+
+fn parse_onef_base_urls() -> Vec<String> {
+    if let Ok(raw) = env::var("ONEF_BASE_URLS") {
+        let urls: Vec<String> = raw
+            .split(',')
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !urls.is_empty() {
+            return urls;
+        }
+    }
+
+    if let Ok(raw) = env::var("ONEF_WEBHOOK_URL") {
+        let trimmed = raw.trim().to_string();
+        if !trimmed.is_empty() {
+            let base = if let Some(idx) = trimmed.find("/app/") {
+                if let Some(pub_idx) = trimmed[idx..].find("/publications") {
+                    let end = idx + pub_idx + "/publications".len();
+                    trimmed[..end].to_string()
+                } else {
+                    trimmed.trim_end_matches('/').to_string()
+                }
+            } else {
+                trimmed.trim_end_matches('/').to_string()
+            };
+            return vec![base];
+        }
+    }
+
+    Vec::new()
 }
