@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn, error};
 
-// ───────────────────────── Payload types ─────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFRequestWrapper {
     #[serde(rename = "requestBody")]
@@ -86,21 +84,13 @@ pub struct OneFCandidateStatusPayload {
     pub updated_at: String,
 }
 
-// ───────────────────────── Well-known paths ─────────────────────────
-
-/// Path appended to base URL for receiving test status updates.
+const PATH_CANDIDATE_RESPONSE: &str = "/action/candidateResponse";
 const PATH_POST_TEST_STATUS: &str = "/action/postTestStatus";
-
-/// Path appended to base URL for receiving inbound messages.
 const PATH_RECEIVE_MESSAGE: &str = "/action/receivemessage";
-
-// ───────────────────────── Service ─────────────────────────
 
 #[derive(Clone)]
 pub struct OneFService {
     client: Client,
-    /// One or more OneF base URLs (e.g. `http://192.168.1.47/app/v1.2/api/publications`).
-    /// The service fans out every notification to **all** configured URLs concurrently.
     base_urls: Vec<String>,
 }
 
@@ -125,8 +115,6 @@ impl OneFService {
     pub fn is_enabled(&self) -> bool {
         !self.base_urls.is_empty()
     }
-
-    // ─────────────── notify_application ───────────────
 
     pub async fn notify_application(
         &self,
@@ -192,14 +180,16 @@ impl OneFService {
             candidate_id, vacancy_id, self.base_urls.len()
         );
 
+        let urls: Vec<String> = self.base_urls.iter()
+            .map(|base| format!("{}{}", base, PATH_CANDIDATE_RESPONSE))
+            .collect();
+
         let body = serde_json::to_value(&wrapper)
             .map_err(|e| format!("Serialization error: {}", e))?;
 
-        self.fan_out_post(&self.base_urls, &body, "new_application").await;
+        self.fan_out_post(&urls, &body, "new_application").await;
         Ok(())
     }
-
-    // ─────────────── notify_grade ───────────────
 
     pub async fn notify_grade(
         &self,
@@ -226,11 +216,13 @@ impl OneFService {
             candidate_id, grade, self.base_urls.len()
         );
 
-        self.fan_out_post(&self.base_urls, &wrapper, "grade_shared").await;
+        let urls: Vec<String> = self.base_urls.iter()
+            .map(|base| format!("{}{}", base, PATH_CANDIDATE_RESPONSE))
+            .collect();
+
+        self.fan_out_post(&urls, &wrapper, "grade_shared").await;
         Ok(())
     }
-
-    // ─────────────── notify_new_message ───────────────
 
     pub async fn notify_new_message(
         &self,
@@ -267,8 +259,6 @@ impl OneFService {
         Ok(())
     }
 
-    // ─────────────── notify_test_status ───────────────
-
     pub async fn notify_test_status(
         &self,
         payload: OneFTestStatusPayload,
@@ -293,8 +283,6 @@ impl OneFService {
         self.fan_out_post(&urls, &wrapper, "test_status").await;
         Ok(())
     }
-
-    // ─────────────── notify_candidate_status ───────────────
 
     pub async fn notify_candidate_status(
         &self,
@@ -321,15 +309,14 @@ impl OneFService {
             candidate_id, payload.status, self.base_urls.len()
         );
 
-        self.fan_out_post(&self.base_urls, &wrapper, "candidate_status_changed").await;
+        let urls: Vec<String> = self.base_urls.iter()
+            .map(|base| format!("{}{}", base, PATH_CANDIDATE_RESPONSE))
+            .collect();
+
+        self.fan_out_post(&urls, &wrapper, "candidate_status_changed").await;
         Ok(())
     }
 
-    // ───────────────────────── Fan-out core ─────────────────────────
-
-    /// Send a POST request with `body` to **every** URL in `urls` concurrently.
-    /// Each request is independent — a failure to one target does NOT affect
-    /// delivery to the others.  Errors are logged but never propagated.
     async fn fan_out_post(
         &self,
         urls: &[String],
@@ -340,13 +327,11 @@ impl OneFService {
             return;
         }
 
-        // For a single target, skip the overhead of spawning a JoinSet.
         if urls.len() == 1 {
             self.post_single(&urls[0], body, event_label).await;
             return;
         }
 
-        // Multiple targets — fire concurrently, wait for all.
         let mut handles = Vec::with_capacity(urls.len());
         for url in urls {
             let client = self.client.clone();
@@ -358,13 +343,11 @@ impl OneFService {
             }));
         }
 
-        // Wait for all to complete (order doesn't matter).
         for handle in handles {
             let _ = handle.await;
         }
     }
 
-    /// POST to a single URL using `self.client`.
     async fn post_single(
         &self,
         url: &str,
@@ -374,7 +357,6 @@ impl OneFService {
         Self::post_with_client(&self.client, url, body, event_label).await;
     }
 
-    /// Low-level POST helper — logs success/failure.
     async fn post_with_client(
         client: &Client,
         url: &str,
