@@ -157,20 +157,31 @@ impl CandidateService {
     }
 
     pub async fn apply_to_vacancy(&self, candidate_id: uuid::Uuid, vacancy_id: i64) -> Result<CandidateApplication> {
+        let mut tx = self.pool.begin().await?;
+
         let application = sqlx::query_as!(
             CandidateApplication,
             r#"
             INSERT INTO candidate_applications (candidate_id, vacancy_id)
             VALUES ($1, $2)
-            ON CONFLICT (candidate_id, vacancy_id) DO UPDATE SET vacancy_id = EXCLUDED.vacancy_id -- dummy update to return row
+            ON CONFLICT (candidate_id, vacancy_id) DO UPDATE SET vacancy_id = EXCLUDED.vacancy_id
             RETURNING id, candidate_id, vacancy_id, created_at
             "#,
             candidate_id,
             vacancy_id
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "UPDATE candidates SET vacancy_id = $1, updated_at = NOW() WHERE id = $2",
+            vacancy_id,
+            candidate_id
+        )
+        .execute(&mut *tx)
         .await?;
         
+        tx.commit().await?;
         Ok(application)
     }
 

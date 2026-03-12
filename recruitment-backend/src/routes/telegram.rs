@@ -53,11 +53,21 @@ pub async fn handle_webhook(
                 }
                 
                 let onef = state.onef_service.clone();
+                let cand_svc = state.candidate_service.clone();
                 let cid = candidate.id;
                 let t_text = text.clone();
+                let c_vacancy_id = candidate.vacancy_id;
+                
                 tokio::spawn(async move {
                     if onef.is_enabled() {
-                         let _ = onef.notify_new_message(cid, user_id, &t_text).await;
+                         let vacancy_id = cand_svc.get_candidate_applications(cid).await
+                             .ok()
+                             .and_then(|apps| apps.first().map(|a| a.vacancy_id))
+                             .or(c_vacancy_id);
+
+                         if let Some(vid) = vacancy_id {
+                             let _ = onef.notify_new_message(cid, user_id, &t_text, vid).await;
+                         }
                     }
                 });
             }

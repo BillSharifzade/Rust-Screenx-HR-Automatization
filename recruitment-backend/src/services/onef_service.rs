@@ -63,6 +63,10 @@ pub struct OneFTestStatusEventData {
     pub passed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_link: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_file_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +199,7 @@ impl OneFService {
         &self,
         candidate_id: uuid::Uuid,
         grade: i32,
+        vacancy_id: i64,
     ) -> Result<(), String> {
         if self.base_urls.is_empty() {
             return Ok(());
@@ -203,6 +208,7 @@ impl OneFService {
         let payload = json!({
             "event_type": "grade_shared",
             "candidate_id": candidate_id,
+            "vacancy_id": vacancy_id,
             "grade": grade,
             "shared_at": chrono::Utc::now().to_rfc3339(),
         });
@@ -229,6 +235,7 @@ impl OneFService {
         candidate_id: uuid::Uuid,
         telegram_id: i64,
         text: &str,
+        vacancy_id: i64,
     ) -> Result<(), String> {
         if self.base_urls.is_empty() {
             return Ok(());
@@ -241,6 +248,7 @@ impl OneFService {
         let payload = json!({
             "event_type": "new_message",
             "candidate_id": candidate_id,
+            "vacancy_id": vacancy_id,
             "telegram_id": telegram_id,
             "text": text,
             "received_at": chrono::Utc::now().to_rfc3339(),
@@ -288,25 +296,27 @@ impl OneFService {
         &self,
         candidate_id: uuid::Uuid,
         status: String,
+        vacancy_id: i64,
     ) -> Result<(), String> {
         if self.base_urls.is_empty() {
             return Ok(());
         }
 
-        let payload = OneFCandidateStatusPayload {
-            event_type: "candidate_status_changed".to_string(),
-            candidate_id,
-            status,
-            updated_at: chrono::Utc::now().to_rfc3339(),
-        };
+        let payload = json!({
+            "event_type": "candidate_status_changed",
+            "candidate_id": candidate_id,
+            "vacancy_id": vacancy_id,
+            "status": status,
+            "updated_at": chrono::Utc::now().to_rfc3339(),
+        });
 
         let wrapper = json!({
             "requestBody": payload
         });
 
         info!(
-            "Pushing candidate status update to 1F: candidate {} status {} → {} target(s)",
-            candidate_id, payload.status, self.base_urls.len()
+            "Pushing candidate status update to 1F: candidate {} status {} for vacancy {} → {} target(s)",
+            candidate_id, status, vacancy_id, self.base_urls.len()
         );
 
         let urls: Vec<String> = self.base_urls.iter()

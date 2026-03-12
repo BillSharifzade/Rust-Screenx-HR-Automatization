@@ -22,6 +22,7 @@ services:
       - MAX_AI_QUESTIONS=${MAX_AI_QUESTIONS:-25}
       - PUBLIC_RPS=${PUBLIC_RPS:-20}
       - INTEGRATION_RPS=${INTEGRATION_RPS:-10}
+      - ONEF_BASE_URLS=${ONEF_BASE_URLS:-}
       - ONEF_WEBHOOK_URL=${ONEF_WEBHOOK_URL:-}
       - RUST_LOG=info,recruitment_backend=debug
     volumes:

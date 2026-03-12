@@ -563,6 +563,9 @@ paths:
                      candidate_id:
                        type: string
                        format: uuid
+                     vacancy_id:
+                       type: integer
+                       description: "Specific vacancy ID this message belongs to"
                      telegram_id:
                        type: integer
                      text:
@@ -570,6 +573,28 @@ paths:
                      received_at:
                        type: string
                        format: date-time
+      responses:
+        '200':
+          description: OK
+
+  /action/candidateResponse:
+    post:
+      summary: "[Webhook] OneF Candidate Event Receiver"
+      description: "Recruitment Platform calls this for various candidate events like application, status changes, and AI grade sharing."
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestBody:
+                  oneOf:
+                    - $ref: '#/components/schemas/OneFNewApplicationEvent'
+                    - $ref: '#/components/schemas/OneFGradeSharedEvent'
+                    - $ref: '#/components/schemas/OneFCandidateStatusChangedEvent'
       responses:
         '200':
           description: OK
@@ -892,4 +917,104 @@ components:
         result_url:
           type: string
           nullable: true
-          description: "Full URL to results or combined presentation info"
+          description: "Combined legacy results string"
+        presentation_link:
+          type: string
+          nullable: true
+          description: "Direct URL to user-provided presentation link"
+        presentation_file_url:
+          type: string
+          nullable: true
+          description: "Absolute URL to the uploaded presentation file on the recruitment platform"
+
+    OneFNewApplicationEvent:
+      type: object
+      required:
+        - event_type
+        - vacancy_id
+        - vacancy_name
+        - candidate
+        - applied_at
+      properties:
+        event_type:
+          type: string
+          example: "new_application"
+        vacancy_id:
+          type: integer
+        vacancy_name:
+          type: string
+        candidate:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            telegram_id:
+              type: integer
+            fullname:
+              type: string
+            name:
+              type: string
+            surname:
+              type: string
+            email:
+              type: string
+            phone:
+              type: string
+            dob:
+              type: string
+            cv_url:
+              type: string
+            ai_rating:
+              type: integer
+            ai_comment:
+              type: string
+        applied_at:
+          type: string
+          format: date-time
+
+    OneFGradeSharedEvent:
+      type: object
+      required:
+        - event_type
+        - candidate_id
+        - vacancy_id
+        - grade
+        - shared_at
+      properties:
+        event_type:
+          type: string
+          example: "grade_shared"
+        candidate_id:
+          type: string
+          format: uuid
+        vacancy_id:
+          type: integer
+        grade:
+          type: integer
+        shared_at:
+          type: string
+          format: date-time
+
+    OneFCandidateStatusChangedEvent:
+      type: object
+      required:
+        - event_type
+        - candidate_id
+        - vacancy_id
+        - status
+        - updated_at
+      properties:
+        event_type:
+          type: string
+          example: "candidate_status_changed"
+        candidate_id:
+          type: string
+          format: uuid
+        vacancy_id:
+          type: integer
+        status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time

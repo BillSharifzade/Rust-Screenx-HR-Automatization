@@ -552,12 +552,25 @@ pub async fn update_candidate_status(
         crate::error::Error::BadRequest("Status is required".into())
     })?.to_string();
 
+    let req_vacancy_id = payload["vacancy_id"].as_i64();
+
     let updated = state.candidate_service.update_status(id, status.clone()).await?;
 
-    let onef = state.onef_service.clone();
-    tokio::spawn(async move {
-        let _ = onef.notify_candidate_status(id, status).await;
-    });
+    let vacancy_id = if let Some(v) = req_vacancy_id {
+        Some(v)
+    } else {
+        state.candidate_service.get_candidate_applications(id).await
+            .ok()
+            .and_then(|apps| apps.first().map(|a| a.vacancy_id))
+            .or(updated.vacancy_id)
+    };
+
+    if let Some(v_id) = vacancy_id {
+        let onef = state.onef_service.clone();
+        tokio::spawn(async move {
+            let _ = onef.notify_candidate_status(id, status, v_id).await;
+        });
+    }
 
     Ok(Json(updated))
 }
@@ -576,14 +589,23 @@ pub async fn share_candidate_grade_to_onef(
         crate::error::Error::BadRequest("Candidate has no AI grade yet. Please run analyze-suitability first.".into())
     })?;
 
-    state.onef_service.notify_grade(id, grade).await.map_err(|e| {
+    let vacancy_id = state.candidate_service.get_candidate_applications(id).await
+        .ok()
+        .and_then(|apps| apps.first().map(|a| a.vacancy_id))
+        .or(candidate.vacancy_id)
+        .ok_or_else(|| {
+            crate::error::Error::BadRequest("Candidate has no associated vacancy".into())
+        })?;
+
+    state.onef_service.notify_grade(id, grade, vacancy_id).await.map_err(|e| {
         crate::error::Error::Internal(format!("Failed to share grade with 1F: {}", e))
     })?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
         "message": "Grade shared with 1F",
-        "grade": grade
+        "grade": grade,
+        "vacancy_id": vacancy_id
     })))
 }
 

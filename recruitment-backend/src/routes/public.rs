@@ -130,6 +130,8 @@ pub async fn start_test(
                             percentage: None,
                             passed: None,
                             result_url: None,
+                            presentation_link: None,
+                            presentation_file_url: None,
                         },
                     }).await;
                 }
@@ -341,7 +343,9 @@ pub async fn submit_presentation(
                         user_score: None,
                         percentage: None,
                         passed: None,
-                        result_url,
+                        result_url: result_url.clone(),
+                        presentation_link: attempt.presentation_submission_link.clone(),
+                        presentation_file_url: attempt.presentation_submission_file_path.clone().map(|p| format!("{}/{}", config.webapp_url, p)),
                     },
                 }).await;
             }
@@ -519,6 +523,8 @@ pub async fn submit_test(
                             percentage: Some(pct_f),
                             passed: Some(passed),
                             result_url,
+                            presentation_link: None,
+                            presentation_file_url: None,
                         },
                     }).await;
                 }
