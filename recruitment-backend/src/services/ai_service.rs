@@ -111,7 +111,8 @@ Rules:
     ) -> Result<String> {
         let system_prompt = "You are an expert HR Copywriter. Write an engaging, professional vacancy description in RUSSIAN language (strictly, even if user context is in another language). \
             Return a JSON object with a single field 'description'. \
-            Use emoji bullets, clear structure, and an enthusiastic tone.".to_string();
+            Use emoji bullets, clear structure, and an enthusiastic tone. \
+            IMPORTANT: Do NOT include any application instructions or bot links at the end — those will be appended automatically.".to_string();
 
         let user_data = serde_json::json!({
             "title": payload.title,
@@ -128,16 +129,18 @@ Rules:
             "response_format": { "type": "json_object" }
         });
 
+        let bot_cta = "\n\n📲 Для подачи заявки обязательно напишите нашему боту в Telegram: @koinot_dhr_bot";
+
         match self.chat_openai(ai_payload).await {
             Ok(resp) => {
                 if let Some(desc) = resp.get("description").and_then(|v| v.as_str()) {
-                    return Ok(desc.trim().to_string());
+                    return Ok(format!("{}{}", desc.trim(), bot_cta));
                 }
             }
             Err(e) => tracing::error!("Vacancy generation failed: {:?}", e),
         }
 
-        Ok(self.fallback_vacancy_description(payload))
+        Ok(format!("{}{}", self.fallback_vacancy_description(payload), bot_cta))
     }
 
     pub async fn analyze_suitability(
