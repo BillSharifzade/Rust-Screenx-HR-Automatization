@@ -1,6 +1,6 @@
 export interface QuestionDetails {
   options?: string[];
-  correct_answer?: string; // For multiple choice
+  correct_answer?: number; // For multiple choice
   sample_input?: string; // For code
   sample_output?: string; // For code
   // Add other specific fields as needed based on QuestionType
@@ -13,9 +13,11 @@ export interface CreateQuestion {
   question: string;
   points: number;
   options?: string[]; // Flattened from details for easier usage if needed, or keep in details
-  correct_answer?: string;
+  correct_answer?: number;
   min_words?: number;
   expected_keywords?: string[];
+  ai_grading?: boolean;
+  explanation?: string;
   _uid?: string; // Frontend animation key
   // ... map other details
 }

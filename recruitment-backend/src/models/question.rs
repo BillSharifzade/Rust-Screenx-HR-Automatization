@@ -58,5 +58,6 @@ pub struct TestCase {
 pub struct ShortAnswerDetails {
     pub expected_keywords: Option<Vec<String>>,
     pub min_words: Option<i32>,
+    #[serde(default)]
     pub ai_grading: bool,
 }

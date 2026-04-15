@@ -128,10 +128,11 @@ export default function NewTestPage() {
                     type: 'multiple_choice',
                     question: '',
                     points: 10,
-                    options: ['', '', '', ''],
-                    correct_answer: '',
+                    options: ['', ''],
+                    correct_answer: 0,
                     min_words: 20,
                     expected_keywords: [],
+                    ai_grading: true
                 },
             ],
         });
@@ -151,7 +152,35 @@ export default function NewTestPage() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        createMutation.mutate(formData);
+        
+        // Sanitize data before sending
+        const sanitizedQuestions = formData.questions?.map(q => {
+            const { _uid, ...rest } = q;
+            if (rest.type === 'multiple_choice') {
+                return {
+                    type: rest.type,
+                    question: rest.question,
+                    points: rest.points,
+                    options: rest.options,
+                    correct_answer: parseInt(rest.correct_answer as any) || 0,
+                    explanation: rest.explanation,
+                };
+            } else {
+                return {
+                    type: rest.type,
+                    question: rest.question,
+                    points: rest.points,
+                    min_words: rest.min_words,
+                    expected_keywords: rest.expected_keywords,
+                    ai_grading: rest.ai_grading ?? true,
+                };
+            }
+        });
+
+        createMutation.mutate({
+            ...formData,
+            questions: sanitizedQuestions as any,
+        });
     };
 
     if (isCreating) {
@@ -470,66 +499,105 @@ export default function NewTestPage() {
                                                         </div>
                                                     </div>
 
-                                                    {question.type === 'multiple_choice' && (
-                                                        <div className="space-y-4">
-                                                            <div className="space-y-2">
-                                                                <Label>{t('dashboard.tests_new.question_card.options')}</Label>
-                                                                {question.options?.map((option: string, optIndex: number) => (
-                                                                    <Input
-                                                                        key={optIndex}
-                                                                        value={option}
-                                                                        onChange={(e) => {
-                                                                            const newOptions = [...(question.options || [])];
-                                                                            newOptions[optIndex] = e.target.value;
-                                                                            updateQuestion(index, 'options', newOptions);
-                                                                        }}
-                                                                        placeholder={`${t('dashboard.tests_new.question_card.option')} ${optIndex + 1}`}
-                                                                        className="mb-2"
-                                                                    />
-                                                                ))}
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label>{t('dashboard.tests_new.question_card.correct_answer')}</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    min="1"
-                                                                    max="4"
-                                                                    value={Number(question.correct_answer || 0) + 1}
-                                                                    onChange={(e) => {
-                                                                        const val = parseInt(e.target.value) || 1;
-                                                                        const clamped = Math.min(4, Math.max(1, val));
-                                                                        updateQuestion(index, 'correct_answer', clamped - 1);
-                                                                    }}
-                                                                    placeholder={t('dashboard.tests_new.question_card.correct_answer_placeholder')}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    )}
+                                                     {question.type === 'multiple_choice' && (
+                                                         <div className="space-y-4">
+                                                             <div className="space-y-2">
+                                                                 <div className="flex items-center justify-between">
+                                                                     <Label>{t('dashboard.tests_new.question_card.options')}</Label>
+                                                                     <Button 
+                                                                         type="button" 
+                                                                         variant="ghost" 
+                                                                         size="sm" 
+                                                                         onClick={() => {
+                                                                             const newOptions = [...(question.options || [])];
+                                                                             newOptions.push('');
+                                                                             updateQuestion(index, 'options', newOptions);
+                                                                         }}
+                                                                         className="h-7 px-2"
+                                                                     >
+                                                                         <Plus className="h-3 w-3 mr-1" />
+                                                                         Add
+                                                                     </Button>
+                                                                 </div>
+                                                                 {question.options?.map((option: string, optIndex: number) => (
+                                                                     <div key={optIndex} className="flex gap-2 mb-2">
+                                                                         <Input
+                                                                             value={option}
+                                                                             onChange={(e) => {
+                                                                                 const newOptions = [...(question.options || [])];
+                                                                                 newOptions[optIndex] = e.target.value;
+                                                                                 updateQuestion(index, 'options', newOptions);
+                                                                             }}
+                                                                             placeholder={`${t('dashboard.tests_new.question_card.option')} ${optIndex + 1}`}
+                                                                         />
+                                                                         {question.options! && question.options!.length > 2 && (
+                                                                             <Button
+                                                                                 type="button"
+                                                                                 variant="ghost"
+                                                                                 size="icon"
+                                                                                 onClick={() => {
+                                                                                     const newOptions = [...(question.options || [])];
+                                                                                     newOptions.splice(optIndex, 1);
+                                                                                     updateQuestion(index, 'options', newOptions);
+                                                                                     
+                                                                                     // Ensure correct_answer stays valid
+                                                                                     if (question.correct_answer! >= newOptions.length) {
+                                                                                         updateQuestion(index, 'correct_answer', newOptions.length - 1);
+                                                                                     }
+                                                                                 }}
+                                                                                 className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                                                                             >
+                                                                                 <Trash2 className="h-4 w-4" />
+                                                                             </Button>
+                                                                         )}
+                                                                     </div>
+                                                                 ))}
+                                                             </div>
+                                                             <div className="space-y-2">
+                                                                 <Label>{t('dashboard.tests_new.question_card.correct_answer')}</Label>
+                                                                 <Select
+                                                                     value={String(question.correct_answer ?? 0)}
+                                                                     onValueChange={(val) => updateQuestion(index, 'correct_answer', parseInt(val))}
+                                                                 >
+                                                                     <SelectTrigger>
+                                                                         <SelectValue placeholder="Select correct answer" />
+                                                                     </SelectTrigger>
+                                                                     <SelectContent>
+                                                                         {question.options?.map((_: any, optIdx: number) => (
+                                                                             <SelectItem key={optIdx} value={String(optIdx)}>
+                                                                                 Option {optIdx + 1}
+                                                                             </SelectItem>
+                                                                         ))}
+                                                                     </SelectContent>
+                                                                 </Select>
+                                                             </div>
+                                                         </div>
+                                                     )}
 
-                                                    {question.type === 'short_answer' && (
-                                                        <div className="space-y-4">
-                                                            <div className="space-y-2">
-                                                                <Label>{t('dashboard.tests_new.question_card.min_words')}</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    min="1"
-                                                                    value={question.min_words || 20}
-                                                                    onChange={(e) => updateQuestion(index, 'min_words', parseInt(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label>{t('dashboard.tests_new.question_card.keywords')}</Label>
-                                                                <Input
-                                                                    value={question.expected_keywords?.join(', ') || ''}
-                                                                    onChange={(e) => updateQuestion(index, 'expected_keywords', e.target.value.split(',').map(s => s.trimStart()))}
-                                                                    placeholder=""
-                                                                />
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    {t('dashboard.tests_new.question_card.keywords_desc')}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    )}
+                                                     {question.type === 'short_answer' && (
+                                                         <div className="space-y-4">
+                                                             <div className="space-y-2">
+                                                                 <Label>{t('dashboard.tests_new.question_card.min_words')}</Label>
+                                                                 <Input
+                                                                     type="number"
+                                                                     min="1"
+                                                                     value={question.min_words || 20}
+                                                                     onChange={(e) => updateQuestion(index, 'min_words', parseInt(e.target.value) || 0)}
+                                                                 />
+                                                             </div>
+                                                             <div className="space-y-2">
+                                                                 <Label>{t('dashboard.tests_new.question_card.keywords')}</Label>
+                                                                 <Input
+                                                                     value={question.expected_keywords?.join(', ') || ''}
+                                                                     onChange={(e) => updateQuestion(index, 'expected_keywords', e.target.value.split(',').map(s => s.trimStart()))}
+                                                                     placeholder=""
+                                                                 />
+                                                                 <p className="text-xs text-muted-foreground">
+                                                                     {t('dashboard.tests_new.question_card.keywords_desc')}
+                                                                 </p>
+                                                             </div>
+                                                         </div>
+                                                     )}
                                                 </div>
                                                 <Button
                                                     type="button"
@@ -548,6 +616,19 @@ export default function NewTestPage() {
                         </AnimatePresence>
                     </div>
 
+                    {(formData.questions?.length ?? 0) > 0 && (
+                        <div className="flex justify-center pb-4">
+                            <Button 
+                                type="button" 
+                                onClick={addQuestion} 
+                                variant="outline" 
+                                className="w-full max-w-xs border-dashed"
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                {t('dashboard.tests_new.questions_list.add_btn')}
+                            </Button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex justify-end gap-2">
