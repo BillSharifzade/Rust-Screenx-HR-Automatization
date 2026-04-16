@@ -155,14 +155,14 @@ export default function NewTestPage() {
         
         // Sanitize data before sending
         const sanitizedQuestions = formData.questions?.map(q => {
-            const { _uid, ...rest } = q;
+            const { _uid, ...rest } = q as any;
             if (rest.type === 'multiple_choice') {
                 return {
                     type: rest.type,
                     question: rest.question,
                     points: rest.points,
-                    options: rest.options,
-                    correct_answer: parseInt(rest.correct_answer as any) || 0,
+                    options: rest.options || [],
+                    correct_answer: typeof rest.correct_answer === 'number' ? rest.correct_answer : parseInt(rest.correct_answer) || 0,
                     explanation: rest.explanation,
                 };
             } else {
