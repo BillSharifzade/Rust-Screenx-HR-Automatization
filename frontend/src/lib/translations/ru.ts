@@ -360,8 +360,11 @@ export const ru = {
                 },
                 options: "Варианты ответов",
                 option: "Вариант",
-                correct_answer: "Правильный ответ (0-3)",
+                correct_answer: "Правильный ответ",
                 correct_answer_placeholder: "Индекс правильного ответа",
+                add_option: "Добавить",
+                select_correct_placeholder: "Выберите правильный ответ",
+                option_label: "Вариант",
                 min_words: "Минимум слов",
                 keywords: "Ключевые слова (через запятую)",
                 keywords_desc: "Используется для AI оценки"

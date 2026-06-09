@@ -360,8 +360,11 @@ export const en = {
                 },
                 options: "Answer Options",
                 option: "Option",
-                correct_answer: "Correct Answer (0-3)",
+                correct_answer: "Correct Answer",
                 correct_answer_placeholder: "Index of correct answer",
+                add_option: "Add",
+                select_correct_placeholder: "Select correct answer",
+                option_label: "Option",
                 min_words: "Minimum words",
                 keywords: "Expected keywords (comma separated)",
                 keywords_desc: "Used for AI answer grading"

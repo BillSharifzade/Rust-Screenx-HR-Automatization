@@ -408,19 +408,21 @@ export default function NewTestPage() {
                                 {formData.questions?.length || 0} {t('dashboard.tests_new.questions_list.count')}
                             </p>
                         </div>
-                        <Button type="button" onClick={addQuestion} variant="outline" size="sm">
-                            <Plus className="mr-2 h-4 w-4" />
-                            {t('dashboard.tests_new.questions_list.add_btn')}
-                        </Button>
                     </div>
 
                     {(!formData.questions || formData.questions.length === 0) && (
                         <Card className="border-dashed">
-                            <CardContent className="flex flex-col items-center justify-center h-32 text-center">
-                                <p className="text-muted-foreground">{t('dashboard.tests_new.questions_list.empty')}</p>
-                                <p className="text-sm text-muted-foreground/70 mt-1">
-                                    {t('dashboard.tests_new.questions_list.empty_desc')}
-                                </p>
+                            <CardContent className="flex flex-col items-center justify-center py-10 text-center gap-4">
+                                <div>
+                                    <p className="text-muted-foreground font-medium">{t('dashboard.tests_new.questions_list.empty')}</p>
+                                    <p className="text-sm text-muted-foreground/70">
+                                        {t('dashboard.tests_new.questions_list.empty_desc')}
+                                    </p>
+                                </div>
+                                <Button type="button" onClick={addQuestion} variant="outline" size="sm" className="mt-2">
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    {t('dashboard.tests_new.questions_list.add_btn')}
+                                </Button>
                             </CardContent>
                         </Card>
                     )}
@@ -516,7 +518,7 @@ export default function NewTestPage() {
                                                                          className="h-7 px-2"
                                                                      >
                                                                          <Plus className="h-3 w-3 mr-1" />
-                                                                         Add
+                                                                         {t('dashboard.tests_new.question_card.add_option')}
                                                                      </Button>
                                                                  </div>
                                                                  {question.options?.map((option: string, optIndex: number) => (
@@ -560,12 +562,12 @@ export default function NewTestPage() {
                                                                      onValueChange={(val) => updateQuestion(index, 'correct_answer', parseInt(val))}
                                                                  >
                                                                      <SelectTrigger>
-                                                                         <SelectValue placeholder="Select correct answer" />
+                                                                         <SelectValue placeholder={t('dashboard.tests_new.question_card.select_correct_placeholder')} />
                                                                      </SelectTrigger>
                                                                      <SelectContent>
                                                                          {question.options?.map((_: any, optIdx: number) => (
                                                                              <SelectItem key={optIdx} value={String(optIdx)}>
-                                                                                 Option {optIdx + 1}
+                                                                                 {t('dashboard.tests_new.question_card.option_label')} {optIdx + 1}
                                                                              </SelectItem>
                                                                          ))}
                                                                      </SelectContent>
