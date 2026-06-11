@@ -1,0 +1,26 @@
+# Caddy reverse proxy for the recruitment platform.
+#
+# NOTE ON TLS: The public edge for *.koinotinav.com is a managed OpenResty
+# reverse proxy that already terminates TLS with a wildcard certificate and
+# forwards plain HTTP to this server on port 80. Therefore Caddy must NOT do
+# its own HTTPS / Let's Encrypt or HTTP->HTTPS redirect -- doing so produced an
+# infinite 308 redirect loop (OpenResty -> Caddy:80 -> "308 to https" -> ...).
+#
+# So this Caddy listens on plain :80 only and just reverse-proxies to the
+# Next.js frontend, which in turn proxies /api/* and /uploads/* to the backend
+# over the internal Docker network (BACKEND_URL=http://backend:8080).
+# We force X-Forwarded-Proto=https so the app knows the original scheme was
+# HTTPS (OpenResty handled it), matching the known-good behaviour.
+
+:80 {
+	encode gzip
+
+	# CV uploads can be up to 50 MB (backend DefaultBodyLimit in main.rs).
+	request_body {
+		max_size 50MB
+	}
+
+	reverse_proxy frontend:3000 {
+		header_up X-Forwarded-Proto https
+	}
+}

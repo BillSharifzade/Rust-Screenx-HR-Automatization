@@ -57,6 +57,27 @@ services:
       - recruitment-network
 
   # ============================================
+  # Caddy Reverse Proxy (TLS termination)
+  # ============================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: recruitment-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - recruitment-network
+
+  # ============================================
   # PostgreSQL Database (Optional - if not external)
   # ============================================
   # Swagger UI Service
@@ -93,5 +114,8 @@ networks:
   recruitment-network:
     driver: bridge
 
+volumes:
+  caddy_data:    # persists Let's Encrypt certs across restarts (avoid re-issuing)
+  caddy_config:
 # volumes:
 #   postgres_data:

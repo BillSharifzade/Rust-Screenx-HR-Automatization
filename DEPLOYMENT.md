@@ -84,49 +84,28 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-## Nginx Reverse Proxy (Recommended)
+## Reverse Proxy & TLS (Caddy)
 
-```nginx
-server {
-    listen 80;
-    server_name recruitment.example.com;
-    return 301 https://$server_name$request_uri;
-}
+The stack ships its own **Caddy** reverse proxy (`docker-compose.yml` → `caddy`
+service, config in [`Caddyfile`](Caddyfile)). Caddy binds host ports `80`/`443`
+and **automatically obtains and renews a Let's Encrypt certificate** for the
+domain — Telegram requires valid HTTPS for both the Mini App and the bot webhook.
 
-server {
-    listen 443 ssl http2;
-    server_name recruitment.example.com;
+All public traffic goes to the **frontend** (`frontend:3000`). The Next.js server
+proxies `/api/*` and `/uploads/*` to the backend over the internal Docker network
+(`frontend/next.config.ts` rewrites → `http://backend:8080`), so only the frontend
+is exposed. Do **not** route `/api` straight to the backend — the frontend's
+relative-URL design (`NEXT_PUBLIC_API_URL=""`) expects everything to flow through it.
 
-    ssl_certificate /etc/letsencrypt/live/recruitment.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/recruitment.example.com/privkey.pem;
+To serve a different domain, edit the site address in `Caddyfile` and recreate the
+container (`docker compose up -d caddy`). Requirements:
+- DNS A record for the domain → this server's public IP
+- Inbound ports **80 and 443** open in the firewall (80 is needed for the ACME challenge)
+- The `caddy_data` volume is persisted so certificates survive restarts (avoids
+  hitting Let's Encrypt rate limits)
 
-    # Frontend
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Backend API
-    location /api/ {
-        proxy_pass http://localhost:8000/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # CV uploads
-    location /uploads/ {
-        proxy_pass http://localhost:8000/uploads/;
-        proxy_set_header Host $host;
-    }
-}
-```
+The `Caddyfile` also sets `request_body max_size 50MB` for CV uploads (backend
+`DefaultBodyLimit` in `main.rs`).
 
 ## Troubleshooting
 
