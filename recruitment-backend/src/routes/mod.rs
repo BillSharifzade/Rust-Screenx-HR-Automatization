@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod external_vacancy;
 pub mod export;
 pub mod health;

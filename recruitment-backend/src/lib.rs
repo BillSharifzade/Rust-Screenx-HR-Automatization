@@ -16,12 +16,14 @@ use crate::services::{
     message_service::MessageService,
     attempt_service::AttemptService,
 };
+use crate::utils::login_guard::LoginGuard;
 use reqwest::Client;
 use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
+    pub login_guard: LoginGuard,
     pub test_service: TestService,
     pub ai_service: AIService,
     pub eval_service: EvalService,
@@ -58,6 +60,7 @@ impl AppState {
 
         Self {
             pool,
+            login_guard: LoginGuard::default(),
             test_service,
             ai_service,
             eval_service,

@@ -445,6 +445,41 @@ async fn main() -> anyhow::Result<()> {
             recruitment_backend::middleware::rate_limit::rps_middleware,
         ));
 
+
+    let auth_public = Router::new()
+        .route("/api/auth/login", post(routes::auth::login))
+        .layer(axum::middleware::from_fn_with_state(
+            recruitment_backend::middleware::rate_limit::new_rps_state(config.public_rps),
+            recruitment_backend::middleware::rate_limit::rps_middleware,
+        ));
+
+    let auth_session = Router::new()
+        .route("/api/auth/me", get(routes::auth::me))
+        .route(
+            "/api/auth/change-password",
+            post(routes::auth::change_my_password),
+        )
+        .layer(axum::middleware::from_fn(
+            recruitment_backend::middleware::auth::require_bearer_auth,
+        ));
+
+    let auth_admin = Router::new()
+        .route(
+            "/api/auth/users",
+            get(routes::auth::list_users).post(routes::auth::create_user),
+        )
+        .route(
+            "/api/auth/users/:id",
+            axum::routing::patch(routes::auth::update_user).delete(routes::auth::delete_user),
+        )
+        .route(
+            "/api/auth/users/:id/password",
+            post(routes::auth::reset_password),
+        )
+        .layer(axum::middleware::from_fn(
+            recruitment_backend::middleware::auth::require_admin,
+        ));
+
     let upload_path = std::env::var("UPLOADS_DIR").unwrap_or_else(|_| "/app/uploads".to_string());
     info!("Serving uploads from: {}", upload_path);
 
@@ -452,6 +487,9 @@ async fn main() -> anyhow::Result<()> {
         .merge(integration_api)
         .merge(public_api)
         .merge(onef_api)
+        .merge(auth_public)
+        .merge(auth_session)
+        .merge(auth_admin)
         .nest_service("/uploads", tower_http::services::ServeDir::new(upload_path))
         .with_state(app_state)
         .layer(CorsLayer::permissive())

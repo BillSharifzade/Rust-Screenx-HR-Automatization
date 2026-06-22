@@ -11,7 +11,9 @@ import {
   ClipboardCheck,
   User,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck,
+  LogOut
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useNotifications } from '@/lib/notifications-context';
+import { useAuth } from '@/lib/auth-context';
 
 const AnimatedHamburger = ({ isOpen }: { isOpen: boolean }) => {
   return (
@@ -52,6 +55,7 @@ const AnimatedHamburger = ({ isOpen }: { isOpen: boolean }) => {
 export function Sidebar() {
   const { t } = useTranslation();
   const { counts } = useNotifications();
+  const { user, isAdmin, logout } = useAuth();
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -63,6 +67,9 @@ export function Sidebar() {
     { name: t('dashboard.nav.invites'), href: '/dashboard/invites', icon: Users },
     { name: t('dashboard.nav.candidates'), href: '/dashboard/candidates', icon: User },
     { name: t('dashboard.nav.attempts'), href: '/dashboard/attempts', icon: ClipboardCheck },
+    ...(isAdmin
+      ? [{ name: t('dashboard.nav.users'), href: '/dashboard/users', icon: ShieldCheck }]
+      : []),
   ];
 
   return (
@@ -199,6 +206,30 @@ export function Sidebar() {
           })}
         </nav>
       </div>
+
+      {/* Current user + logout */}
+      {user && (
+        <div className={cn("border-t px-3 py-3", isCollapsed && "px-2")}>
+          {!isCollapsed && (
+            <div className="mb-2 min-w-0 px-1">
+              <p className="truncate text-sm font-medium">{user.name}</p>
+              <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            onClick={logout}
+            title={isCollapsed ? t('auth.logout') : undefined}
+            className={cn(
+              "w-full text-muted-foreground hover:text-destructive",
+              isCollapsed ? "justify-center px-0" : "justify-start gap-2"
+            )}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            {!isCollapsed && <span className="text-sm">{t('auth.logout')}</span>}
+          </Button>
+        </div>
+      )}
 
       {/* Subtle credit */}
       <AnimatePresence mode="wait">
