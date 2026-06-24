@@ -40,7 +40,6 @@ Thumbs.db
 # --- Testing & Scripts ---
 **/test_1f_webhook.py
 **/test_api.py
-**/vacancy_creation.py
 **/*.log
 
 # --- Docker ---
