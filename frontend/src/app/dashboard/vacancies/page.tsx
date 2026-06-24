@@ -124,7 +124,7 @@ function VacanciesContent() {
         <div className="space-y-6">
             <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                    <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.vacancies.title')}</h3>
+                    <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">{t('dashboard.vacancies.title')}</h1>
                     <p className="text-muted-foreground flex items-center gap-2 text-xs">
                         <ExternalLink className="h-3 w-3" />
                         job.koinotinav.tj

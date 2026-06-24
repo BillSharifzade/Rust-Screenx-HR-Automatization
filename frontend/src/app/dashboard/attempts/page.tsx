@@ -132,7 +132,7 @@ export default function TestAttemptsPage() {
         <div className="space-y-6">
             <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                    <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.attempts.title')}</h3>
+                    <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">{t('dashboard.attempts.title')}</h1>
                     <p className="text-muted-foreground">
                         {t('dashboard.attempts.subtitle')}
                     </p>
