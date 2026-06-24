@@ -140,8 +140,6 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Responses ("Отклики") worker: create a response row for every new application,
-    // then auto-grade ungraded responses with the existing AI suitability analysis.
     {
         let state = app_state.clone();
         tokio::spawn(async move {
