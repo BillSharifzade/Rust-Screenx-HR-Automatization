@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge';
 import { MapPin, Building2, Flame, ExternalLink, Calendar, Users } from 'lucide-react';
 import { format } from 'date-fns';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n-context';
 import { enUS, ru as ruLocale } from 'date-fns/locale';
 import {
@@ -20,6 +22,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
 export default function VacanciesPage() {
+    return (
+        <Suspense fallback={null}>
+            <VacanciesContent />
+        </Suspense>
+    );
+}
+
+function VacanciesContent() {
     const { t, language } = useTranslation();
     const dateLocale = language === 'ru' ? ruLocale : enUS;
     const { data, isLoading, error } = useQuery({
@@ -29,6 +39,26 @@ export default function VacanciesPage() {
 
     const [selectedVacancy, setSelectedVacancy] = useState<ExternalVacancy | null>(null);
     const [viewCandidatesVacancy, setViewCandidatesVacancy] = useState<ExternalVacancy | null>(null);
+
+    // Deep-link highlight (e.g. from the Responses board "Open vacancy" action)
+    const searchParams = useSearchParams();
+    const highlightId = searchParams.get('highlight');
+    const [highlightedId, setHighlightedId] = useState<number | null>(null);
+    const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+    useEffect(() => {
+        if (!highlightId || !data?.vacancies) return;
+        const id = Number(highlightId);
+        const t1 = setTimeout(() => {
+            const el = cardRefs.current.get(id);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setHighlightedId(id);
+                setTimeout(() => setHighlightedId(null), 2600);
+            }
+        }, 400);
+        return () => clearTimeout(t1);
+    }, [highlightId, data]);
 
     // Fetch candidates for selected vacancy
     const { data: candidates, isLoading: candidatesLoading } = useQuery({
@@ -111,7 +141,11 @@ export default function VacanciesPage() {
                     return (
                         <Card
                             key={vacancy.id}
-                            className="cursor-pointer premium-hover group overflow-hidden border-muted-foreground/10"
+                            ref={(el) => { if (el) cardRefs.current.set(vacancy.id, el); }}
+                            className={cn(
+                                "cursor-pointer premium-hover group overflow-hidden border-muted-foreground/10 transition-all duration-500",
+                                highlightedId === vacancy.id && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-lg shadow-primary/20 scale-[1.02]"
+                            )}
                             onClick={() => setSelectedVacancy(vacancy)}
                         >
                             <CardHeader className="p-3 pb-1.5 space-y-1.5">
