@@ -14,3 +14,4 @@ pub mod vacancy_service;
 pub mod koinotinav_service;
 pub mod onef_service;
 pub mod message_service;
+pub mod response_service;

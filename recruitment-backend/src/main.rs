@@ -140,6 +140,48 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Responses ("Отклики") worker: create a response row for every new application,
+    // then auto-grade ungraded responses with the existing AI suitability analysis.
+    {
+        let state = app_state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            loop {
+                if let Err(e) = state.response_service.reconcile_missing().await {
+                    tracing::error!("Response reconcile error: {:?}", e);
+                }
+                match state.response_service.claim_ungraded(3).await {
+                    Ok(batch) => {
+                        for u in batch {
+                            match routes::responses::grade_one(&state, u.candidate_id, u.vacancy_id).await {
+                                Ok((grade, comment, title)) => {
+                                    if let Err(e) = state
+                                        .response_service
+                                        .set_ai_result(u.id, grade, comment, title)
+                                        .await
+                                    {
+                                        tracing::error!("Failed to store AI grade for {}: {:?}", u.id, e);
+                                    } else {
+                                        tracing::info!("AI graded response {} ({}%)", u.id, grade);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("AI grading failed for response {}: {:?}", u.id, e);
+                                    let _ = state
+                                        .response_service
+                                        .mark_ai_failed(u.id, Some("AI grading unavailable".into()))
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => tracing::error!("claim_ungraded error: {:?}", e),
+                }
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+    }
+
     let base_routes = Router::new().route("/health", get(routes::health::health));
 
     let integration_api = Router::new()
@@ -217,6 +259,15 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/integration/test-attempts",
             get(routes::integration::list_test_attempts),
+        )
+        .route(
+            "/api/integration/responses",
+            get(routes::responses::list_responses),
+        )
+        .route(
+            "/api/integration/responses/:id",
+            get(routes::responses::get_response)
+                .patch(routes::responses::update_response),
         )
         .route(
             "/api/integration/candidates",

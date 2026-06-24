@@ -69,7 +69,7 @@ async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
     Ok(format!("uploads/cv/{}", safe_filename))
 }
 
-async fn extract_text_from_file(file_path: &str) -> String {
+pub(crate) async fn extract_text_from_file(file_path: &str) -> String {
     let path = std::path::Path::new(file_path);
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
