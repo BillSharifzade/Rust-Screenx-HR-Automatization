@@ -76,3 +76,48 @@ export async function deleteCandidate(id: string): Promise<void> {
         method: 'DELETE',
     });
 }
+
+// ---- Responses ("Отклики") kanban ----
+
+export interface ResponseCard {
+    id: string;
+    candidate_id: string;
+    candidate_name: string;
+    candidate_email: string;
+    candidate_phone?: string | null;
+    candidate_cv_url?: string | null;
+    telegram_id?: number | null;
+    vacancy_id: number;
+    vacancy_title?: string | null;
+    status: string;
+    ai_grade?: number | null;
+    ai_comment?: string | null;
+    hr_comment?: string | null;
+    test_attempt_id?: string | null;
+    decision?: string | null;
+    responded_at: string;
+    updated_at: string;
+}
+
+export interface ResponsesFeed {
+    stages: string[];
+    items: ResponseCard[];
+}
+
+export interface UpdateResponseBody {
+    status?: string;
+    hr_comment?: string;
+    decision?: "accepted" | "rejected";
+    test_attempt_id?: string;
+}
+
+export function listResponses(): Promise<ResponsesFeed> {
+    return apiFetch<ResponsesFeed>("/api/integration/responses");
+}
+
+export function updateResponse(id: string, body: UpdateResponseBody): Promise<ResponseCard> {
+    return apiFetch<ResponseCard>(`/api/integration/responses/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+    });
+}

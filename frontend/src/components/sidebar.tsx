@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  KanbanSquare,
   LogOut
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
@@ -66,6 +67,7 @@ export function Sidebar() {
     { name: t('dashboard.nav.tests'), href: '/dashboard/tests', icon: FileText },
     { name: t('dashboard.nav.invites'), href: '/dashboard/invites', icon: Users },
     { name: t('dashboard.nav.candidates'), href: '/dashboard/candidates', icon: User },
+    { name: t('dashboard.nav.responses'), href: '/dashboard/responses', icon: KanbanSquare },
     { name: t('dashboard.nav.attempts'), href: '/dashboard/attempts', icon: ClipboardCheck },
     ...(isAdmin
       ? [{ name: t('dashboard.nav.users'), href: '/dashboard/users', icon: ShieldCheck }]

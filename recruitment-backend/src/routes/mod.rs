@@ -10,3 +10,4 @@ pub mod vacancy;
 pub mod webhook;
 pub mod koinotinav;
 pub mod onef;
+pub mod responses;

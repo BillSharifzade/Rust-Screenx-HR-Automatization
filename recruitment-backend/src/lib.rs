@@ -15,6 +15,7 @@ use crate::services::{
     koinotinav_service::KoinotinavService, onef_service::OneFService,
     message_service::MessageService,
     attempt_service::AttemptService,
+    response_service::ResponseService,
 };
 use crate::utils::login_guard::LoginGuard;
 use reqwest::Client;
@@ -35,6 +36,7 @@ pub struct AppState {
     pub onef_service: OneFService,
     pub message_service: MessageService,
     pub attempt_service: AttemptService,
+    pub response_service: ResponseService,
 }
 
 impl AppState {
@@ -61,6 +63,7 @@ impl AppState {
         let onef_service = OneFService::new(config.onef_base_urls.clone());
         let message_service = MessageService::new(pool.clone());
         let attempt_service = AttemptService::new(pool.clone());
+        let response_service = ResponseService::new(pool.clone());
 
         Self {
             pool,
@@ -76,6 +79,7 @@ impl AppState {
             onef_service,
             message_service,
             attempt_service,
+            response_service,
         }
     }
 }

@@ -9,3 +9,4 @@ pub mod candidate;
 pub mod vacancy;
 pub mod webhook_log;
 pub mod message;
+pub mod response;
