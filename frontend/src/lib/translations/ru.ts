@@ -559,6 +559,7 @@ export const ru = {
             empty_col: "Пусто",
             ai_grade: "Оценка ИИ",
             ai_pending: "ИИ оценивает…",
+            ai_failed: "ИИ недоступен",
             hr_comment: "Комментарий HR",
             add_comment: "Добавить комментарий HR",
             edit_comment: "Комментарий HR",
@@ -577,6 +578,8 @@ export const ru = {
             cancel: "Отмена",
             updated: "Отклик обновлён",
             update_failed: "Ошибка обновления",
+            open_candidate: "Открыть кандидата",
+            open_vacancy: "Открыть вакансию",
             stages: {
                 cv_screening: "Скрининг CV",
                 phone_interview: "Телефонное интервью",

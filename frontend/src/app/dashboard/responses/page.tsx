@@ -1,14 +1,16 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { format } from "date-fns"
 import type { Locale } from "date-fns"
 import { ru as localeRu, enUS as localeEn } from "date-fns/locale"
 import {
-    ChevronLeft, ChevronRight, Sparkles, Loader2, FileText,
+    ChevronLeft, ChevronRight, Sparkles, Loader2,
     Check, X, MoreHorizontal, Clock, User as UserIcon, Briefcase, MessageSquare,
+    Mail, Phone, ArrowUpRight, AlertCircle,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -20,7 +22,8 @@ import {
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { listResponses, updateResponse, ResponseCard, ResponsesFeed, UpdateResponseBody } from "@/lib/api"
+import { listResponses, updateResponse, ResponseCard, ResponsesFeed, UpdateResponseBody, apiFetch } from "@/lib/api"
+import { ExternalVacancyListResponse } from "@/types/api"
 import { useTranslation } from "@/lib/i18n-context"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -31,6 +34,8 @@ const DEFAULT_STAGES = [
     "cv_screening", "phone_interview", "interview_1", "test_task",
     "presentation", "interview_2", "final_decision",
 ]
+
+const stripHtml = (s?: string | null) => (s ?? "").replace(/<\/?[^>]+(>|$)/g, "").trim()
 
 function gradeClasses(grade?: number | null): string {
     if (grade == null) return "bg-muted text-muted-foreground"
@@ -50,6 +55,19 @@ export default function ResponsesPage() {
         queryFn: listResponses,
         refetchInterval: 15000,
     })
+
+    const { data: vacancyData } = useQuery({
+        queryKey: ["external-vacancies"],
+        queryFn: () => apiFetch<ExternalVacancyListResponse>("/api/integration/external-vacancies"),
+        staleTime: 5 * 60 * 1000,
+    })
+
+    const vacancyName = useMemo(() => {
+        const map = new Map<number, string>()
+        vacancyData?.vacancies?.forEach((v) => map.set(v.id, stripHtml(v.title)))
+        return (card: ResponseCard) =>
+            map.get(card.vacancy_id) || stripHtml(card.vacancy_title) || `#${card.vacancy_id}`
+    }, [vacancyData])
 
     const stages = data?.stages ?? DEFAULT_STAGES
     const items = data?.items ?? []
@@ -100,13 +118,12 @@ export default function ResponsesPage() {
         mutation.mutate({ id: card.id, body: { hr_comment } })
 
     return (
-        <div className="flex flex-col h-[calc(100vh-1rem)] p-4 md:p-6 gap-4">
+        <div className="flex flex-col h-[calc(100vh-3rem)] lg:h-[calc(100vh-4rem)] gap-6">
             <header className="shrink-0">
-                <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                    <Sparkles className="h-6 w-6 text-primary" />
+                <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
                     {t("dashboard.responses.title")}
                 </h1>
-                <p className="text-sm text-muted-foreground mt-1">{t("dashboard.responses.subtitle")}</p>
+                <p className="text-muted-foreground mt-2 text-lg">{t("dashboard.responses.subtitle")}</p>
             </header>
 
             {isLoading ? (
@@ -121,7 +138,7 @@ export default function ResponsesPage() {
                 <div className="flex-1 min-h-0 flex gap-4 overflow-x-auto pb-2">
                     {stages.map((stage, si) => (
                         <div key={stage} className="flex flex-col w-[300px] shrink-0 rounded-xl bg-muted/40 border">
-                            <div className="flex items-center justify-between px-3 py-2.5 border-b sticky top-0">
+                            <div className="flex items-center justify-between px-3 py-2.5 border-b">
                                 <span className="text-sm font-semibold">{stageLabel(stage)}</span>
                                 <Badge variant="secondary" className="rounded-full">{byStage[stage]?.length ?? 0}</Badge>
                             </div>
@@ -135,6 +152,7 @@ export default function ResponsesPage() {
                                             stageIndex={si}
                                             t={t}
                                             stageLabel={stageLabel}
+                                            vacancyName={vacancyName}
                                             dateLocale={locale}
                                             onMove={move}
                                             onMoveTo={moveTo}
@@ -158,13 +176,14 @@ export default function ResponsesPage() {
 }
 
 function ResponseCardView({
-    card, stages, stageIndex, t, stageLabel, dateLocale, onMove, onMoveTo, onDecide, onSaveComment,
+    card, stages, stageIndex, t, stageLabel, vacancyName, dateLocale, onMove, onMoveTo, onDecide, onSaveComment,
 }: {
     card: ResponseCard
     stages: string[]
     stageIndex: number
     t: (k: string) => string
     stageLabel: (s: string) => string
+    vacancyName: (c: ResponseCard) => string
     dateLocale: Locale
     onMove: (c: ResponseCard, dir: 1 | -1) => void
     onMoveTo: (c: ResponseCard, status: string) => void
@@ -172,177 +191,251 @@ function ResponseCardView({
     onSaveComment: (c: ResponseCard, comment: string) => void
 }) {
     const [commentOpen, setCommentOpen] = useState(false)
+    const [detailOpen, setDetailOpen] = useState(false)
     const [draft, setDraft] = useState(card.hr_comment ?? "")
     const isFirst = stageIndex === 0
     const isLast = stageIndex === stages.length - 1
     const isFinal = card.status === "final_decision"
+    const vname = vacancyName(card)
+    const stop = (e: React.MouseEvent) => e.stopPropagation()
 
     return (
-        <motion.div
-            layout
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="rounded-lg border bg-card shadow-sm hover:shadow-md transition-shadow p-3 space-y-2.5"
-        >
-            {/* candidate + grade */}
-            <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                    <div className="font-medium text-sm flex items-center gap-1.5 truncate">
-                        <UserIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{card.candidate_name}</span>
+        <>
+            <motion.div
+                layout
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
+                onClick={() => setDetailOpen(true)}
+                className="rounded-lg border bg-card shadow-sm hover:shadow-md hover:border-primary/40 transition-all p-3 space-y-2.5 cursor-pointer"
+            >
+                {/* candidate + grade */}
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                        <div className="font-medium text-sm flex items-center gap-1.5 truncate">
+                            <UserIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{card.candidate_name}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground flex items-center gap-1.5 truncate mt-0.5">
+                            <Briefcase className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{vname}</span>
+                        </div>
                     </div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 truncate mt-0.5">
-                        <Briefcase className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{card.vacancy_title || `#${card.vacancy_id}`}</span>
-                    </div>
-                </div>
-                {card.ai_grade != null ? (
-                    <Badge variant="outline" className={cn("shrink-0 font-semibold tabular-nums", gradeClasses(card.ai_grade))}>
-                        {card.ai_grade}%
-                    </Badge>
-                ) : (
-                    <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        {t("dashboard.responses.ai_pending")}
-                    </Badge>
-                )}
-            </div>
-
-            {/* AI comment */}
-            {card.ai_comment && (
-                <p className="text-xs text-muted-foreground leading-snug line-clamp-3 bg-muted/40 rounded-md p-2">
-                    <Sparkles className="h-3 w-3 inline mr-1 -mt-0.5 text-primary" />
-                    {card.ai_comment}
-                </p>
-            )}
-
-            {/* HR comment */}
-            {card.hr_comment && (
-                <p className="text-xs leading-snug line-clamp-2 border-l-2 border-primary/40 pl-2">
-                    <MessageSquare className="h-3 w-3 inline mr-1 -mt-0.5" />
-                    {card.hr_comment}
-                </p>
-            )}
-
-            {/* decision badge */}
-            {isFinal && card.decision && (
-                <Badge
-                    variant="outline"
-                    className={cn(
-                        "w-full justify-center",
-                        card.decision === "accepted"
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                            : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
+                    {card.ai_grade != null ? (
+                        <Badge variant="outline" className={cn("shrink-0 font-semibold tabular-nums", gradeClasses(card.ai_grade))}>
+                            {card.ai_grade}%
+                        </Badge>
+                    ) : card.ai_graded_at == null ? (
+                        <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            {t("dashboard.responses.ai_pending")}
+                        </Badge>
+                    ) : (
+                        <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground/80">
+                            <AlertCircle className="h-3 w-3" />
+                            {t("dashboard.responses.ai_failed")}
+                        </Badge>
                     )}
-                >
-                    {card.decision === "accepted" ? t("dashboard.responses.accepted") : t("dashboard.responses.rejected")}
-                </Badge>
-            )}
+                </div>
 
-            {/* meta */}
-            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                {format(new Date(card.responded_at), "d MMM yyyy", { locale: dateLocale })}
-                {card.candidate_cv_url && (
-                    <a
-                        href={card.candidate_cv_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto inline-flex items-center gap-1 hover:text-primary transition-colors"
+                {card.ai_comment && (
+                    <p className="text-xs text-muted-foreground leading-snug line-clamp-3 bg-muted/40 rounded-md p-2">
+                        <Sparkles className="h-3 w-3 inline mr-1 -mt-0.5 text-primary" />
+                        {card.ai_comment}
+                    </p>
+                )}
+
+                {card.hr_comment && (
+                    <p className="text-xs leading-snug line-clamp-2 border-l-2 border-primary/40 pl-2">
+                        <MessageSquare className="h-3 w-3 inline mr-1 -mt-0.5" />
+                        {card.hr_comment}
+                    </p>
+                )}
+
+                {isFinal && card.decision && (
+                    <Badge
+                        variant="outline"
+                        className={cn(
+                            "w-full justify-center",
+                            card.decision === "accepted"
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
+                        )}
                     >
-                        <FileText className="h-3 w-3" /> CV
-                    </a>
+                        {card.decision === "accepted" ? t("dashboard.responses.accepted") : t("dashboard.responses.rejected")}
+                    </Badge>
                 )}
-            </div>
 
-            {/* actions */}
-            <div className="flex items-center gap-1 pt-1 border-t">
-                <Button
-                    variant="ghost" size="icon" className="h-7 w-7"
-                    disabled={isFirst}
-                    title={t("dashboard.responses.move_prev")}
-                    onClick={() => onMove(card, -1)}
-                >
-                    <ChevronLeft className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    {format(new Date(card.responded_at), "d MMM yyyy", { locale: dateLocale })}
+                </div>
 
-                {isFinal ? (
-                    <div className="flex-1 flex gap-1">
-                        <Button
-                            variant="outline" size="sm"
-                            className="h-7 flex-1 text-emerald-600 hover:text-emerald-600 hover:bg-emerald-500/10"
-                            onClick={() => onDecide(card, "accepted")}
-                        >
-                            <Check className="h-3.5 w-3.5 mr-1" /> {t("dashboard.responses.accept")}
-                        </Button>
-                        <Button
-                            variant="outline" size="sm"
-                            className="h-7 flex-1 text-rose-600 hover:text-rose-600 hover:bg-rose-500/10"
-                            onClick={() => onDecide(card, "rejected")}
-                        >
-                            <X className="h-3.5 w-3.5 mr-1" /> {t("dashboard.responses.reject")}
-                        </Button>
+                {/* actions — clicks here must not open the detail dialog */}
+                <div className="flex items-center gap-1 pt-1 border-t" onClick={stop}>
+                    <Button
+                        variant="ghost" size="icon" className="h-7 w-7"
+                        disabled={isFirst}
+                        title={t("dashboard.responses.move_prev")}
+                        onClick={() => onMove(card, -1)}
+                    >
+                        <ChevronLeft className="h-4 w-4" />
+                    </Button>
+
+                    {isFinal ? (
+                        <div className="flex-1 flex gap-1">
+                            <Button
+                                variant="outline" size="sm"
+                                className="h-7 flex-1 text-emerald-600 hover:text-emerald-600 hover:bg-emerald-500/10"
+                                onClick={() => onDecide(card, "accepted")}
+                            >
+                                <Check className="h-3.5 w-3.5 mr-1" /> {t("dashboard.responses.accept")}
+                            </Button>
+                            <Button
+                                variant="outline" size="sm"
+                                className="h-7 flex-1 text-rose-600 hover:text-rose-600 hover:bg-rose-500/10"
+                                onClick={() => onDecide(card, "rejected")}
+                            >
+                                <X className="h-3.5 w-3.5 mr-1" /> {t("dashboard.responses.reject")}
+                            </Button>
+                        </div>
+                    ) : (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-7 flex-1 text-xs">
+                                    <MoreHorizontal className="h-3.5 w-3.5 mr-1" />
+                                    {t("dashboard.responses.move_to")}
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="center">
+                                {stages.map((s) => (
+                                    <DropdownMenuItem
+                                        key={s}
+                                        disabled={s === card.status}
+                                        onClick={() => onMoveTo(card, s)}
+                                    >
+                                        {stageLabel(s)}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+
+                    <Dialog open={commentOpen} onOpenChange={(o) => { setCommentOpen(o); if (o) setDraft(card.hr_comment ?? "") }}>
+                        <DialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title={t("dashboard.responses.edit_comment")}>
+                                <MessageSquare className="h-4 w-4" />
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent onClick={stop}>
+                            <DialogHeader>
+                                <DialogTitle>{t("dashboard.responses.edit_comment")}</DialogTitle>
+                            </DialogHeader>
+                            <Textarea
+                                value={draft}
+                                onChange={(e) => setDraft(e.target.value)}
+                                placeholder={t("dashboard.responses.comment_placeholder")}
+                                rows={4}
+                            />
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setCommentOpen(false)}>
+                                    {t("dashboard.responses.cancel")}
+                                </Button>
+                                <Button onClick={() => { onSaveComment(card, draft); setCommentOpen(false) }}>
+                                    {t("dashboard.responses.save")}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Button
+                        variant="ghost" size="icon" className="h-7 w-7"
+                        disabled={isLast}
+                        title={t("dashboard.responses.move_next")}
+                        onClick={() => onMove(card, 1)}
+                    >
+                        <ChevronRight className="h-4 w-4" />
+                    </Button>
+                </div>
+            </motion.div>
+
+            {/* full detail dialog (opens on card press) */}
+            <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <UserIcon className="h-5 w-5 text-primary" />
+                            {card.candidate_name}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-4 text-sm">
+                        <div className="flex items-center justify-between">
+                            <Badge variant="secondary">{stageLabel(card.status)}</Badge>
+                            {card.ai_grade != null && (
+                                <Badge variant="outline" className={cn("font-semibold", gradeClasses(card.ai_grade))}>
+                                    {t("dashboard.responses.ai_grade")}: {card.ai_grade}%
+                                </Badge>
+                            )}
+                        </div>
+
+                        <div className="grid gap-1.5 text-muted-foreground">
+                            <div className="flex items-center gap-2"><Briefcase className="h-4 w-4 shrink-0" /><span className="text-foreground">{vname}</span></div>
+                            <div className="flex items-center gap-2"><Mail className="h-4 w-4 shrink-0" /><span>{card.candidate_email}</span></div>
+                            {card.candidate_phone && (
+                                <div className="flex items-center gap-2"><Phone className="h-4 w-4 shrink-0" /><span>{card.candidate_phone}</span></div>
+                            )}
+                            <div className="flex items-center gap-2"><Clock className="h-4 w-4 shrink-0" />
+                                {t("dashboard.responses.responded")}: {format(new Date(card.responded_at), "d MMM yyyy, HH:mm", { locale: dateLocale })}
+                            </div>
+                        </div>
+
+                        {card.ai_comment && (
+                            <div>
+                                <div className="font-medium flex items-center gap-1.5 mb-1"><Sparkles className="h-4 w-4 text-primary" />{t("dashboard.responses.ai_grade")}</div>
+                                <p className="text-muted-foreground leading-relaxed bg-muted/40 rounded-md p-3">{card.ai_comment}</p>
+                            </div>
+                        )}
+
+                        {card.hr_comment && (
+                            <div>
+                                <div className="font-medium flex items-center gap-1.5 mb-1"><MessageSquare className="h-4 w-4" />{t("dashboard.responses.hr_comment")}</div>
+                                <p className="leading-relaxed border-l-2 border-primary/40 pl-3">{card.hr_comment}</p>
+                            </div>
+                        )}
+
+                        {isFinal && card.decision && (
+                            <Badge
+                                variant="outline"
+                                className={cn(
+                                    "w-full justify-center",
+                                    card.decision === "accepted"
+                                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                        : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
+                                )}
+                            >
+                                {card.decision === "accepted" ? t("dashboard.responses.accepted") : t("dashboard.responses.rejected")}
+                            </Badge>
+                        )}
                     </div>
-                ) : (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-7 flex-1 text-xs">
-                                <MoreHorizontal className="h-3.5 w-3.5 mr-1" />
-                                {t("dashboard.responses.move_to")}
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="center">
-                            {stages.map((s) => (
-                                <DropdownMenuItem
-                                    key={s}
-                                    disabled={s === card.status}
-                                    onClick={() => onMoveTo(card, s)}
-                                >
-                                    {stageLabel(s)}
-                                </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                )}
 
-                <Dialog open={commentOpen} onOpenChange={(o) => { setCommentOpen(o); if (o) setDraft(card.hr_comment ?? "") }}>
-                    <DialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title={t("dashboard.responses.edit_comment")}>
-                            <MessageSquare className="h-4 w-4" />
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button asChild variant="outline" className="flex-1">
+                            <Link href={`/dashboard/candidates?highlight=${card.candidate_id}`}>
+                                <UserIcon className="h-4 w-4 mr-1.5" /> {t("dashboard.responses.open_candidate")}
+                                <ArrowUpRight className="h-3.5 w-3.5 ml-1 opacity-60" />
+                            </Link>
                         </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>{t("dashboard.responses.edit_comment")}</DialogTitle>
-                        </DialogHeader>
-                        <Textarea
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            placeholder={t("dashboard.responses.comment_placeholder")}
-                            rows={4}
-                        />
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setCommentOpen(false)}>
-                                {t("dashboard.responses.cancel")}
-                            </Button>
-                            <Button onClick={() => { onSaveComment(card, draft); setCommentOpen(false) }}>
-                                {t("dashboard.responses.save")}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-
-                <Button
-                    variant="ghost" size="icon" className="h-7 w-7"
-                    disabled={isLast}
-                    title={t("dashboard.responses.move_next")}
-                    onClick={() => onMove(card, 1)}
-                >
-                    <ChevronRight className="h-4 w-4" />
-                </Button>
-            </div>
-        </motion.div>
+                        <Button asChild variant="outline" className="flex-1">
+                            <Link href={`/dashboard/vacancies?highlight=${card.vacancy_id}`}>
+                                <Briefcase className="h-4 w-4 mr-1.5" /> {t("dashboard.responses.open_vacancy")}
+                                <ArrowUpRight className="h-3.5 w-3.5 ml-1 opacity-60" />
+                            </Link>
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     )
 }
