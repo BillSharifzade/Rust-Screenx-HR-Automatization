@@ -67,7 +67,7 @@ export default function TestsPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h3 className="text-2xl font-bold tracking-tight">{t('dashboard.tests.title')}</h3>
+                    <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">{t('dashboard.tests.title')}</h1>
                     <p className="text-muted-foreground">
                         {t('dashboard.tests.subtitle')}
                     </p>
