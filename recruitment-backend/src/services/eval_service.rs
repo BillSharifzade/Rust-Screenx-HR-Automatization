@@ -14,10 +14,7 @@ impl EvalService {
     }
 
     pub async fn critique_question(&self, question: &JsonValue) -> Result<(f32, String)> {
-        let models = &[
-            "google/gemma-3n-e2b-it:free",
-            "deepseek/deepseek-chat-v3.1:free",
-        ];
+        let models = &["gpt-4o"];
         let payload = serde_json::json!({
             "system": "You are a strict quality judge for assessment questions. Output a JSON object with 'score' (0.0-1.0) and 'critique' string.",
             "user": {
@@ -90,7 +87,7 @@ impl EvalService {
             };
             if let Ok(resp) = self
                 .client
-                .post("https://openrouter.ai/api/v1/chat/completions")
+                .post("https://api.openai.com/v1/chat/completions")
                 .bearer_auth(&self.api_key)
                 .json(&req)
                 .send()

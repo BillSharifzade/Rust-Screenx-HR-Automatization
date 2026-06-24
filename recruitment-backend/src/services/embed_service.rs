@@ -32,12 +32,12 @@ impl EmbedService {
             return Ok(Vec::new());
         }
         let body = EmbReq {
-            model: "nomic-ai/nomic-embed-text-v1.5",
+            model: "text-embedding-3-small",
             input: texts,
         };
         let resp = self
             .client
-            .post("https://openrouter.ai/api/v1/embeddings")
+            .post("https://api.openai.com/v1/embeddings")
             .bearer_auth(&self.api_key)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")

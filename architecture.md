@@ -18,7 +18,7 @@ graph TB
         OneF["OneF (1F) ERP<br/>192.168.1.47"]
         TG["Telegram Bot API"]
         KN["job.koinotinav.tj<br/>(Job Portal)"]
-        AI["OpenRouter/OpenAI"]
+        AI["OpenAI"]
     end
 
     subgraph "Recruitment Platform"
@@ -51,7 +51,7 @@ graph TB
 | **Backend** | Rust, Axum, SQLx, Tokio |
 | **Database** | PostgreSQL 15+ |
 | **Frontend** | Next.js (Telegram Mini App) |
-| **AI** | OpenRouter / OpenAI API |
+| **AI** | OpenAI API |
 | **Messaging** | Telegram Bot API |
 | **Job Portal** | job.koinotinav.tj (Selenium automation) |
 | **Container** | Docker + docker-compose |
@@ -624,7 +624,7 @@ sequenceDiagram
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram Bot API token |
 | `TELEGRAM_BOT_WEBHOOK_URL` | Yes | URL where the NotificationService delivers webhook_logs |
 | `WEBAPP_URL` | Yes | Mini App base URL (used in Telegram buttons + CV URLs) |
-| `OPENAI_API_KEY` | Yes | OpenRouter/OpenAI key for AI features |
+| `OPENAI_API_KEY` | Yes | OpenAI key for AI features |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `SERVER_ADDRESS` | Yes | Bind address (e.g., `0.0.0.0:8080`) |
 | `JWT_SECRET` | Yes | JWT signing key |

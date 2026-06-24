@@ -118,6 +118,36 @@ paths:
         '404':
           description: Candidate not found
 
+  /pipeline/advise:
+    post:
+      summary: Stage-Aware Pipeline Advisor (AI)
+      description: >
+        Context-aware AI co-pilot for the recruitment funnel. 1F sends the current `stage`
+        plus all accumulated `history` (every prior stage's results as held in the 1F card),
+        and the model — aware of the whole pipeline — returns a cross-stage summary, a
+        proceed/hold/reject recommendation, a 0-100 score, concrete advice, and (for interview
+        stages) a list of questions tailored from prior-stage data. Stateless: nothing is read
+        from or written to the platform DB, so HR can call it at any point in the process.
+      tags:
+        - AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFPipelineAdviceRequest'
+      responses:
+        '200':
+          description: AI recommendation for the requested stage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFPipelineAdvice'
+        '400':
+          description: Unknown or missing stage
+        '500':
+          description: AI provider error
+
   /candidates/{id}/attempts:
     get:
       summary: Get Candidate Test Attempts
@@ -601,6 +631,93 @@ paths:
 
 components:
   schemas:
+    OneFPipelineAdviceRequest:
+      type: object
+      required:
+        - stage
+      properties:
+        stage:
+          type: string
+          description: Current funnel stage to advise on.
+          enum:
+            - cv_screening
+            - phone_interview
+            - interview_1
+            - test_task
+            - presentation
+            - interview_2
+            - final_decision
+        candidate:
+          type: object
+          description: Free-form candidate context (e.g. name, email, phone, region).
+          additionalProperties: true
+          example:
+            name: Иван Петров
+            email: ivan@example.com
+            phone: "+992900000000"
+            region: Душанбе
+        vacancy:
+          type: object
+          description: Free-form vacancy context (e.g. title, description).
+          additionalProperties: true
+          example:
+            title: Backend-разработчик (Rust)
+            description: Проектирование и поддержка сервисов на Rust/axum...
+        history:
+          type: object
+          description: >
+            Accumulated results of prior stages, keyed by stage name, exactly as held in the
+            1F card. Free-form — pass whatever fields are already filled.
+          additionalProperties: true
+          example:
+            cv_screening:
+              score: 78
+              insights: Сильный бэкенд-опыт, мало опыта с очередями сообщений.
+            phone_interview:
+              hr_summary: Хорошая коммуникация, ожидания по зарплате выше вилки.
+        language:
+          type: string
+          description: Output language for human-readable text.
+          default: ru
+          example: ru
+
+    OneFPipelineAdvice:
+      type: object
+      properties:
+        stage:
+          type: string
+          description: Echo of the evaluated stage.
+        summary:
+          type: string
+          description: Cross-stage summary of where the candidate stands in the funnel.
+        recommendation:
+          type: string
+          description: Suggested next move.
+          enum:
+            - proceed
+            - hold
+            - reject
+        score:
+          type: integer
+          description: Overall fit/confidence to advance, 0-100.
+          minimum: 0
+          maximum: 100
+        advice:
+          type: array
+          description: Concrete advice / next actions for the HR running this stage.
+          items:
+            type: string
+        suggested_questions:
+          type: array
+          description: Questions tailored from prior-stage data (empty for non-interview stages).
+          items:
+            type: string
+        risk_flags:
+          type: array
+          description: Risks, gaps or red flags worth probing further.
+          items:
+            type: string
+
     OneFDashboardStats:
       type: object
       properties:

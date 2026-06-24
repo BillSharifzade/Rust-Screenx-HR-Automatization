@@ -22,6 +22,28 @@ pub struct OneFSendMessageRequest {
 pub struct OneFUpdateStatusRequest {
     pub status: String,
 }
+#[derive(Debug, Deserialize)]
+pub struct OneFPipelineAdviceRequest {
+    pub stage: String,
+    #[serde(default)]
+    pub candidate: serde_json::Value,
+    #[serde(default)]
+    pub vacancy: serde_json::Value,
+    #[serde(default)]
+    pub history: serde_json::Value,
+    #[serde(default)]
+    pub language: Option<String>,
+}
+
+const PIPELINE_STAGES: &[&str] = &[
+    "cv_screening",
+    "phone_interview",
+    "interview_1",
+    "test_task",
+    "presentation",
+    "interview_2",
+    "final_decision",
+];
 
 #[derive(Debug, Deserialize)]
 pub struct OneFCreateInviteRequest {
@@ -206,6 +228,28 @@ pub async fn update_candidate_status(
         "status": payload.status,
         "updated_at": chrono::Utc::now()
     })))
+}
+
+pub async fn pipeline_advise(
+    State(state): State<AppState>,
+    Json(payload): Json<OneFPipelineAdviceRequest>,
+) -> Result<impl IntoResponse> {
+    let stage = payload.stage.trim().to_lowercase();
+    if !PIPELINE_STAGES.contains(&stage.as_str()) {
+        return Err(crate::error::Error::BadRequest(format!(
+            "Unknown stage '{}'. Expected one of: {}",
+            payload.stage,
+            PIPELINE_STAGES.join(", ")
+        )));
+    }
+
+    let language = payload.language.as_deref().unwrap_or("ru");
+    let advice = state
+        .ai_service
+        .advise_pipeline_stage(&stage, &payload.candidate, &payload.vacancy, &payload.history, language)
+        .await?;
+
+    Ok(Json(advice))
 }
 
 pub async fn get_candidate(

@@ -25,15 +25,40 @@ pub struct CandidateSuitability {
     pub comment: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PipelineAdvice {
+    pub stage: String,
+    pub summary: String,
+    pub recommendation: String,
+    pub score: i32,
+    #[serde(default)]
+    pub advice: Vec<String>,
+    #[serde(default)]
+    pub suggested_questions: Vec<String>,
+    #[serde(default)]
+    pub risk_flags: Vec<String>,
+}
+
+pub fn normalize_pipeline_advice(mut advice: PipelineAdvice, stage: &str) -> PipelineAdvice {
+    advice.stage = stage.to_string();
+    advice.score = advice.score.clamp(0, 100);
+    advice.recommendation = match advice.recommendation.trim().to_lowercase().as_str() {
+        "proceed" | "hold" | "reject" => advice.recommendation.trim().to_lowercase(),
+        _ => "hold".to_string(),
+    };
+    advice
+}
+
 #[derive(Clone)]
 pub struct AIService {
     client: Client,
     api_key: String,
+    api_base: String,
 }
 
 impl AIService {
-    pub fn new(api_key: String, client: Client) -> Self {
-        Self { client, api_key }
+    pub fn new(api_key: String, api_base: String, client: Client) -> Self {
+        Self { client, api_key, api_base }
     }
 
     pub async fn generate_test(
@@ -211,6 +236,68 @@ Rules:
         let resp = self.chat_openai(payload).await?;
         let suitability: CandidateSuitability = serde_json::from_value(resp)?;
         Ok(suitability)
+    }
+
+    pub async fn advise_pipeline_stage(
+        &self,
+        stage: &str,
+        candidate: &JsonValue,
+        vacancy: &JsonValue,
+        history: &JsonValue,
+        language: &str,
+    ) -> Result<PipelineAdvice> {
+        let lang = if language.trim().is_empty() { "ru" } else { language.trim() };
+
+        let system_prompt = format!(
+            r#"You are an expert recruitment co-pilot embedded in an HR pipeline (the "Первая Форма"/1F system).
+A candidate moves through a multi-stage hiring funnel. The stages, in order, are:
+1. cv_screening    — CV uploaded, AI screening score + insights.
+2. phone_interview — short phone screen; HR records a summary.
+3. interview_1     — first face-to-face interview; HR comments, culture & competency notes.
+4. test_task       — take-home test assignment; status, HR comment, percentage score.
+5. presentation    — presentation/case analysis (ПЗГ); score, strengths, weaknesses, conclusion.
+6. interview_2     — final interview with the lead/manager; hard-skills assessment, manager comment.
+7. final_decision  — hiring decision; outcome and reasoning.
+
+You are given the candidate, the vacancy, and `history`: every stage that has ALREADY been filled in.
+Your job is to reason about the WHOLE funnel so far and produce guidance for the CURRENT stage only.
+
+Rules:
+- Be aware of all prior stages: connect the dots (e.g. a concern raised on the phone screen should
+  drive the questions you suggest for interview_1).
+- `suggested_questions` MUST be tailored to this candidate using prior-stage data — never generic.
+  If the current stage is not an interview (e.g. final_decision), suggested_questions may be empty.
+- `recommendation` is exactly one of: "proceed", "hold", "reject".
+- `score` is an integer 0-100 reflecting overall fit/confidence to advance.
+- Be honest and specific; surface gaps and red flags in `risk_flags`.
+- Write ALL human-readable text (summary, advice, suggested_questions, risk_flags) in {lang} language.
+
+Return ONLY a JSON object with this exact shape:
+{{"stage": string, "summary": string, "recommendation": "proceed|hold|reject", "score": 0-100,
+  "advice": [string], "suggested_questions": [string], "risk_flags": [string]}}"#,
+            lang = lang
+        );
+
+        let user_data = serde_json::json!({
+            "current_stage": stage,
+            "candidate": candidate,
+            "vacancy": vacancy,
+            "history": history,
+        });
+
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": serde_json::to_string(&user_data).unwrap()}
+            ],
+            "response_format": { "type": "json_object" },
+            "temperature": 0.4
+        });
+
+        let resp = self.chat_openai(payload).await?;
+        let advice: PipelineAdvice = serde_json::from_value(resp)?;
+        Ok(normalize_pipeline_advice(advice, stage))
     }
 
     async fn analyze_suitability_with_vision(
@@ -400,7 +487,7 @@ Rules:
 
     async fn chat_openai(&self, payload: JsonValue) -> Result<JsonValue> {
         let res = self.client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(format!("{}/chat/completions", self.api_base))
             .bearer_auth(&self.api_key)
             .json(&payload)
             .timeout(Duration::from_secs(120))
@@ -531,6 +618,96 @@ Rules:
             "{} at {}. \n\nWe are looking for a professional with: {}.\n\nApply now!",
             payload.title, payload.company, payload.professional_skills.clone().unwrap_or_default()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_full_advice_from_model_json() {
+        let raw = serde_json::json!({
+            "stage": "interview_1",
+            "summary": "Сильный бэкенд, но завышенные зарплатные ожидания.",
+            "recommendation": "proceed",
+            "score": 72,
+            "advice": ["Уточнить вилку на старте интервью"],
+            "suggested_questions": ["Расскажите про опыт с очередями сообщений?"],
+            "risk_flags": ["Ожидания по зарплате выше бюджета"]
+        });
+        let advice: PipelineAdvice = serde_json::from_value(raw).expect("must deserialize");
+        assert_eq!(advice.recommendation, "proceed");
+        assert_eq!(advice.score, 72);
+        assert_eq!(advice.suggested_questions.len(), 1);
+        assert_eq!(advice.risk_flags.len(), 1);
+    }
+
+    #[test]
+    fn deserializes_with_missing_optional_arrays() {
+        let raw = serde_json::json!({
+            "stage": "final_decision",
+            "summary": "Все этапы пройдены.",
+            "recommendation": "proceed",
+            "score": 88
+        });
+        let advice: PipelineAdvice = serde_json::from_value(raw).expect("must deserialize");
+        assert!(advice.advice.is_empty());
+        assert!(advice.suggested_questions.is_empty());
+        assert!(advice.risk_flags.is_empty());
+    }
+
+    #[test]
+    fn normalize_clamps_score_and_overrides_stage() {
+        let advice = PipelineAdvice {
+            stage: "garbage_from_model".into(),
+            summary: "s".into(),
+            recommendation: "proceed".into(),
+            score: 250,
+            advice: vec![],
+            suggested_questions: vec![],
+            risk_flags: vec![],
+        };
+        let out = normalize_pipeline_advice(advice, "interview_2");
+        assert_eq!(out.stage, "interview_2", "stage must be our label, not the model's");
+        assert_eq!(out.score, 100, "score must clamp to 100");
+    }
+
+    #[test]
+    fn normalize_clamps_negative_score() {
+        let advice = PipelineAdvice {
+            stage: "x".into(),
+            summary: "s".into(),
+            recommendation: "reject".into(),
+            score: -40,
+            advice: vec![],
+            suggested_questions: vec![],
+            risk_flags: vec![],
+        };
+        let out = normalize_pipeline_advice(advice, "cv_screening");
+        assert_eq!(out.score, 0);
+        assert_eq!(out.recommendation, "reject");
+    }
+
+    #[test]
+    fn normalize_coerces_unknown_recommendation_to_hold() {
+        for bad in ["maybe", "PROCEED ", "", "yes", "Reject"] {
+            let advice = PipelineAdvice {
+                stage: "x".into(),
+                summary: "s".into(),
+                recommendation: bad.into(),
+                score: 50,
+                advice: vec![],
+                suggested_questions: vec![],
+                risk_flags: vec![],
+            };
+            let out = normalize_pipeline_advice(advice, "phone_interview");
+            let expected = match bad.trim().to_lowercase().as_str() {
+                "proceed" | "hold" | "reject" => bad.trim().to_lowercase(),
+                _ => "hold".to_string(),
+            };
+            assert_eq!(out.recommendation, expected, "input was {:?}", bad);
+        }
     }
 }
 

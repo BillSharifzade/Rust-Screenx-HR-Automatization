@@ -17,7 +17,7 @@ INTEGRATION_RPS=10
 
 Required infrastructure:
 - PostgreSQL 15+ reachable at `DATABASE_URL`
-- OpenRouter/OpenAI key if AI generation should run end-to-end
+- OpenAI API key if AI generation should run end-to-end
 - Chromium + chromedriver binaries (installed automatically in Docker image)
 
 ### Provisioning PostgreSQL (example on Ubuntu)

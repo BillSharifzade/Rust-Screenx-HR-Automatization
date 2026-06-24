@@ -46,7 +46,11 @@ impl AppState {
             .unwrap();
 
         let test_service = TestService::new(pool.clone());
-        let ai_service = AIService::new(config.openai_api_key.clone(), http_client.clone());
+        let ai_service = AIService::new(
+            config.openai_api_key.clone(),
+            config.openai_base_url.clone(),
+            http_client.clone(),
+        );
         let eval_service = EvalService::new(config.openai_api_key.clone(), http_client.clone());
         let embed_service = EmbedService::new(config.openai_api_key.clone(), http_client);
         let notification_service =

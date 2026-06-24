@@ -10,6 +10,7 @@ pub struct Config {
     pub jwt_secret: String,
     pub webhook_secret: String,
     pub openai_api_key: String,
+    pub openai_base_url: String,
     pub telegram_bot_webhook_url: String,
     pub integration_rps: u32,
     pub public_rps: u32,
@@ -31,6 +32,11 @@ impl Config {
             jwt_secret: get_env("JWT_SECRET")?,
             webhook_secret: get_env("WEBHOOK_SECRET")?,
             openai_api_key: get_env("OPENAI_API_KEY")?,
+            openai_base_url: env::var("OPENAI_BASE_URL")
+                .ok()
+                .map(|s| s.trim().trim_end_matches('/').to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
             telegram_bot_webhook_url: get_env("TELEGRAM_BOT_WEBHOOK_URL")?,
             integration_rps: get_env_parse("INTEGRATION_RPS")?,
             public_rps: get_env_parse("PUBLIC_RPS")?,

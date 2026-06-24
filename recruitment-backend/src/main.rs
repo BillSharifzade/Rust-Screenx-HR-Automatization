@@ -425,6 +425,10 @@ async fn main() -> anyhow::Result<()> {
             post(routes::candidate_routes::analyze_candidate_suitability),
         )
         .route(
+            "/api/onef/pipeline/advise",
+            post(routes::onef::pipeline_advise),
+        )
+        .route(
             "/api/onef/tests",
             get(routes::onef::list_tests),
         )
