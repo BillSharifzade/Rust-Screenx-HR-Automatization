@@ -49,6 +49,7 @@ pub struct ResponseCard {
     pub status: String,
     pub ai_grade: Option<i32>,
     pub ai_comment: Option<String>,
+    pub ai_graded_at: Option<DateTime<Utc>>,
     pub hr_comment: Option<String>,
     pub test_attempt_id: Option<Uuid>,
     pub decision: Option<String>,

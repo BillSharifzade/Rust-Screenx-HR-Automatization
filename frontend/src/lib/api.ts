@@ -92,6 +92,7 @@ export interface ResponseCard {
     status: string;
     ai_grade?: number | null;
     ai_comment?: string | null;
+    ai_graded_at?: string | null;
     hr_comment?: string | null;
     test_attempt_id?: string | null;
     decision?: string | null;

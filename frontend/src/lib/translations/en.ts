@@ -559,6 +559,7 @@ export const en = {
             empty_col: "Empty",
             ai_grade: "AI grade",
             ai_pending: "AI grading…",
+            ai_failed: "AI n/a",
             hr_comment: "HR comment",
             add_comment: "Add HR comment",
             edit_comment: "Edit HR comment",
@@ -577,6 +578,8 @@ export const en = {
             cancel: "Cancel",
             updated: "Response updated",
             update_failed: "Update failed",
+            open_candidate: "Open candidate",
+            open_vacancy: "Open vacancy",
             stages: {
                 cv_screening: "CV Screening",
                 phone_interview: "Phone Interview",

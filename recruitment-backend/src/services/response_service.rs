@@ -33,7 +33,7 @@ impl ResponseService {
                 c.cv_url AS candidate_cv_url,
                 c.telegram_id,
                 r.vacancy_id, r.vacancy_title, r.status,
-                r.ai_grade, r.ai_comment, r.hr_comment,
+                r.ai_grade, r.ai_comment, r.ai_graded_at, r.hr_comment,
                 r.test_attempt_id, r.decision, r.responded_at, r.updated_at
             FROM responses r
             JOIN candidates c ON c.id = r.candidate_id

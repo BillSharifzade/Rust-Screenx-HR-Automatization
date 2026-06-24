@@ -203,7 +203,7 @@ export default function UsersPage() {
                         <UsersIcon className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight">{t('auth.users.title')}</h1>
+                        <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">{t('auth.users.title')}</h1>
                         <p className="text-sm text-muted-foreground">{t('auth.users.subtitle')}</p>
                     </div>
                 </div>
