@@ -277,9 +277,9 @@ export default function NewTestPage() {
                                 id="ai-num-questions"
                                 type="number"
                                 min="1"
-                                max="25"
+                                max="200"
                                 value={aiNumQuestions}
-                                onChange={(e) => setAiNumQuestions(Math.min(25, Math.max(1, parseInt(e.target.value) || 1)))}
+                                onChange={(e) => setAiNumQuestions(Math.min(200, Math.max(1, parseInt(e.target.value) || 1)))}
                             />
                         </div>
                         <div className="flex gap-2">

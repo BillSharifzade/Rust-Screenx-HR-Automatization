@@ -13,6 +13,9 @@ use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
 
+const GENERATION_BATCH_SIZE: usize = 25;
+const MAX_PARALLEL_BATCHES: usize = 8;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GenerationOutput {
     pub questions: Vec<Question>,
@@ -70,7 +73,111 @@ impl AIService {
         let mut logs: Vec<String> = vec![];
         logs.push(format!("Starting GPT-4o generation for {} questions.", num_questions));
 
-        let system_prompt = r#"You are a Senior Technical Recruiter and Engineering Manager. 
+        let total_batches = num_questions.div_ceil(GENERATION_BATCH_SIZE).max(1);
+        logs.push(format!(
+            "Planning {} batch(es) of up to {} questions.",
+            total_batches, GENERATION_BATCH_SIZE
+        ));
+
+        let mut collected: Vec<(usize, Vec<Question>)> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+        let mut next_batch = 0usize;
+
+        while next_batch < total_batches {
+            let window = (total_batches - next_batch).min(MAX_PARALLEL_BATCHES);
+            let mut tasks = tokio::task::JoinSet::new();
+
+            for offset in 0..window {
+                let index = next_batch + offset;
+                let produced = num_questions.saturating_sub(index * GENERATION_BATCH_SIZE);
+                let count = produced.min(GENERATION_BATCH_SIZE);
+                if count == 0 {
+                    continue;
+                }
+
+                let service = self.clone();
+                let profession = profession.to_string();
+                let skills = skills.to_vec();
+                tasks.spawn(async move {
+                    let result = service
+                        .generate_question_batch(&profession, &skills, count, index, total_batches)
+                        .await;
+                    (index, result)
+                });
+            }
+
+            while let Some(joined) = tasks.join_next().await {
+                match joined {
+                    Ok((index, Ok(questions))) => collected.push((index, questions)),
+                    Ok((index, Err(e))) => {
+                        failures.push(format!("batch {}: {}", index + 1, e));
+                        tracing::warn!("AI generation batch {} failed: {}", index + 1, e);
+                    }
+                    Err(e) => failures.push(format!("join error: {}", e)),
+                }
+            }
+
+            next_batch += window;
+        }
+
+        collected.sort_by_key(|(index, _)| *index);
+
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut questions: Vec<Question> = Vec::new();
+        for (_, batch) in collected {
+            for question in batch {
+                let key = question
+                    .question
+                    .to_lowercase()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if key.is_empty() || !seen.insert(key) {
+                    continue;
+                }
+                questions.push(question);
+                if questions.len() == num_questions {
+                    break;
+                }
+            }
+            if questions.len() == num_questions {
+                break;
+            }
+        }
+
+        if questions.is_empty() {
+            let detail = if failures.is_empty() {
+                "no questions returned".to_string()
+            } else {
+                failures.join("; ")
+            };
+            return Err(anyhow::anyhow!("AI generation produced no questions: {}", detail).into());
+        }
+
+        for (idx, question) in questions.iter_mut().enumerate() {
+            question.id = (idx as i32) + 1;
+        }
+
+        if !failures.is_empty() {
+            logs.push(format!("{} batch(es) failed: {}", failures.len(), failures.join("; ")));
+        }
+        logs.push(format!("Finalized {} questions.", questions.len()));
+
+        Ok(GenerationOutput {
+            questions,
+            logs,
+        })
+    }
+
+    async fn generate_question_batch(
+        &self,
+        profession: &str,
+        skills: &[String],
+        count: usize,
+        batch_index: usize,
+        total_batches: usize,
+    ) -> Result<Vec<Question>> {
+        let system_prompt = r#"You are a Senior Technical Recruiter and Engineering Manager.
 Your task is to generate a comprehensive technical assessment test in RUSSIAN language (Cyrillic).
 The output must be a valid JSON object containing a 'questions' array.
 
@@ -83,19 +190,29 @@ Rules:
 6. CRITICAL: For multiple choice questions, VARY the correct_answer index. Do NOT always use 0.
    - Distribute correct answers across all positions (0, 1, 2, 3) roughly equally.
    - The correct answer should match the actual correct option's position.
+7. This request is one slice of a larger exam assembled from several slices.
+   Cover a distinct part of the topic space for your slice and never repeat a
+   question that an adjacent slice would obviously produce.
 "#;
 
         let user_schema = serde_json::json!({
             "profession": profession,
             "skills": skills,
-            "required_count": num_questions,
+            "required_count": count,
+            "slice_index": batch_index + 1,
+            "slice_total": total_batches,
+            "slice_instruction": format!(
+                "Produce slice {} of {}. Progress from foundational to advanced across slices, and keep every question unique within the whole exam.",
+                batch_index + 1,
+                total_batches
+            ),
             "schema_example": {
                 "questions": [
                     {
                         "type": "multiple_choice",
                         "question": "Russian text here...",
                         "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-                        "correct_answer": 2, // index - VARY THIS! Don't always use 0
+                        "correct_answer": 2,
                         "explanation": "Why option at index 2 is correct..."
                     },
                     {
@@ -118,16 +235,8 @@ Rules:
             "temperature": 0.8
         });
 
-        logs.push("Sending request to OpenAI...".to_string());
         let response_json = self.chat_openai(payload).await?;
-        logs.push("Response received. Parsing and sanitizing...".to_string());
-        let questions = self.sanitize_questions(&response_json, num_questions);
-        logs.push(format!("Finalized {} questions.", questions.len()));
-
-        Ok(GenerationOutput {
-            questions,
-            logs,
-        })
+        Ok(self.sanitize_questions(&response_json, count))
     }
 
     pub async fn generate_vacancy_description(

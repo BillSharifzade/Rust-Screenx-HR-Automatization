@@ -77,6 +77,49 @@ export async function deleteCandidate(id: string): Promise<void> {
     });
 }
 
+function filenameFromDisposition(header: string | null, fallback: string): string {
+    if (!header) return fallback;
+
+    const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match) {
+        try {
+            return decodeURIComponent(utf8Match[1].trim());
+        } catch {
+            // fall through to the ASCII form
+        }
+    }
+
+    const asciiMatch = header.match(/filename="?([^";]+)"?/i);
+    return asciiMatch ? asciiMatch[1].trim() : fallback;
+}
+
+export async function downloadTestPdf(id: string, lang: string, fallbackName: string): Promise<void> {
+    const token = tokenStore.getToken();
+    const response = await fetch(
+        `${BASE_URL}/api/integration/tests/${id}/pdf?lang=${encodeURIComponent(lang)}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+
+    if (!response.ok) {
+        throw new Error(`API Error ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const filename = filenameFromDisposition(
+        response.headers.get('content-disposition'),
+        fallbackName,
+    );
+
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+}
+
 // ---- Responses ("Отклики") kanban ----
 
 export interface ResponseCard {

@@ -13,7 +13,6 @@ use crate::models::user::AdminUser;
 use crate::utils::crypto::{hash_password, verify_password};
 use crate::AppState;
 
-/// Columns selected into [`AdminUser`] everywhere in this module.
 const USER_COLS: &str = "id, name, email, role, is_active, must_change_password, \
     password_hash, last_login_at, created_at, updated_at";
 
@@ -32,7 +31,6 @@ fn db_err(e: sqlx::Error) -> (StatusCode, Json<JsonValue>) {
     err(StatusCode::INTERNAL_SERVER_ERROR, "database_error")
 }
 
-/// Best-effort client IP, honoring the reverse-proxy headers (OpenResty/Caddy).
 fn client_ip(headers: &HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
@@ -74,10 +72,6 @@ fn validate_email(email: &str) -> Result<(), (StatusCode, Json<JsonValue>)> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Login + session
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub email: String,
@@ -93,7 +87,6 @@ pub async fn login(
     let ip = client_ip(&headers);
     let key = format!("{}|{}", ip, email);
 
-    // Brute-force lockout check.
     if let Err(retry_after) = state.login_guard.check(&key) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -142,7 +135,6 @@ pub async fn login(
     let user = user.expect("validated user exists");
     state.login_guard.record_success(&key);
 
-    // Stamp last login (best-effort).
     let _ = sqlx::query("UPDATE users SET last_login_at = NOW() WHERE id = $1")
         .bind(user.id)
         .execute(&state.pool)
@@ -192,8 +184,6 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-/// Lets the logged-in user rotate their own password (used to clear the
-/// forced "must change password" state on the seeded admin).
 pub async fn change_my_password(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -234,10 +224,6 @@ pub async fn change_my_password(
 
     Ok(Json(json!({ "status": "ok" })))
 }
-
-// ---------------------------------------------------------------------------
-// User management (admin only — gated by require_admin middleware)
-// ---------------------------------------------------------------------------
 
 pub async fn list_users(State(state): State<AppState>) -> ApiResult {
     let users = sqlx::query_as::<_, AdminUser>(&format!(
@@ -324,7 +310,6 @@ pub async fn update_user(
         Some(e) => {
             let e = e.trim().to_lowercase();
             validate_email(&e)?;
-            // Reject if the email belongs to a different user.
             let clash = sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM users WHERE lower(email) = $1 AND id <> $2",
             )
@@ -345,7 +330,6 @@ pub async fn update_user(
         validate_role(role)?;
     }
 
-    // Guard against demoting/deactivating the last remaining active admin.
     if req.role.as_deref().map(|r| r != "admin").unwrap_or(false)
         || req.is_active == Some(false)
     {
@@ -424,7 +408,6 @@ pub async fn delete_user(
     Ok(Json(json!({ "status": "deleted" })))
 }
 
-/// Returns an error if `id` is the last active admin (prevents lockout).
 async fn guard_last_admin(
     state: &AppState,
     id: Uuid,

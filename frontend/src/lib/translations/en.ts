@@ -441,7 +441,7 @@ export const en = {
                 profession_placeholder: "e.g., Rust Developer, Project Manager",
                 context: "Extra Context (optional)",
                 prompt_placeholder: "e.g., Focus on concurrency and error handling",
-                num_questions: "Number of questions (max 25)",
+                num_questions: "Number of questions (max 200)",
                 submit: "Generate Questions",
                 cancel: "Cancel",
                 generating: "AI is generating... this will take about a minute, it's a nice time to make a coffee :)"
@@ -522,6 +522,9 @@ export const en = {
             attempts: "attempts",
             edit: "Edit",
             send: "Send",
+            download_pdf: "Download PDF",
+            download_success: "PDF downloaded",
+            download_error: "Failed to download PDF",
             delete_confirm: "Delete test?",
             delete_desc: "This action cannot be undone.",
             no_tests: "No tests found",

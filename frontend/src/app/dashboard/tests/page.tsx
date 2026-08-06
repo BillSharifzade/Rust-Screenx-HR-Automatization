@@ -1,14 +1,15 @@
 'use client';
 
+import { useState } from 'react';
 import { formatText } from '@/lib/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, downloadTestPdf } from '@/lib/api';
 import { Test } from '@/types/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-    Plus, Clock, Trash2, Edit, Send,
+    Plus, Clock, Trash2, Edit, Send, Download, Loader2,
     Calendar, ListChecks, AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -34,6 +35,7 @@ export default function TestsPage() {
     const dateLocale = language === 'ru' ? ruLocale : enUS;
     const queryClient = useQueryClient();
     const router = useRouter();
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['tests'],
@@ -53,6 +55,18 @@ export default function TestsPage() {
 
     const handleDelete = (id: string) => {
         deleteMutation.mutate(id);
+    };
+
+    const handleDownloadPdf = async (test: Test) => {
+        setDownloadingId(test.id);
+        try {
+            await downloadTestPdf(test.id, language, `${test.title}.pdf`);
+            toast.success(t('dashboard.tests.download_success'));
+        } catch (err) {
+            toast.error(`${t('dashboard.tests.download_error')}: ${(err as Error).message}`);
+        } finally {
+            setDownloadingId(null);
+        }
     };
 
     if (isLoading) {
@@ -160,6 +174,21 @@ export default function TestsPage() {
                                             {t('common.edit')}
                                         </Button>
                                     </Link>
+
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={downloadingId === test.id}
+                                        onClick={() => handleDownloadPdf(test)}
+                                        title={t('dashboard.tests.download_pdf')}
+                                    >
+                                        {downloadingId === test.id ? (
+                                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                            <Download className="mr-2 h-3.5 w-3.5" />
+                                        )}
+                                        {t('dashboard.tests.download_pdf')}
+                                    </Button>
 
                                     <Button
                                         variant="default"

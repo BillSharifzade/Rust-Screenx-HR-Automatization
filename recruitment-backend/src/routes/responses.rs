@@ -7,8 +7,6 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-/// Run the existing AI suitability analysis for one response.
-/// Returns (grade 0-100, comment, cleaned vacancy title). Used by the background grader.
 pub async fn grade_one(
     state: &AppState,
     candidate_id: Uuid,
@@ -66,7 +64,6 @@ pub async fn grade_one(
     Ok((suitability.rating, suitability.comment, Some(v_name_clean.trim().to_string())))
 }
 
-/// GET /api/integration/responses — kanban feed (all responses + candidate info).
 pub async fn list_responses(State(state): State<AppState>) -> Result<impl IntoResponse> {
     let cards = state.response_service.list().await?;
     Ok(Json(serde_json::json!({
@@ -89,15 +86,12 @@ pub async fn get_response(
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateResponsePayload {
-    /// Target pipeline stage (one of RESPONSE_STAGES).
     pub status: Option<String>,
     pub hr_comment: Option<String>,
-    /// "accepted" | "rejected" — only meaningful at final_decision.
     pub decision: Option<String>,
     pub test_attempt_id: Option<Uuid>,
 }
 
-/// PATCH /api/integration/responses/:id — move stage / set HR comment / decision.
 pub async fn update_response(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

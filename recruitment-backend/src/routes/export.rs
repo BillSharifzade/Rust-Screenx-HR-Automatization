@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::IntoResponse,
     Json,
@@ -11,6 +11,73 @@ use crate::{AppState, error::Result};
 #[derive(Debug, Deserialize)]
 pub struct BulkExportRequest {
     pub candidate_ids: Option<Vec<uuid::Uuid>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestPdfQuery {
+    pub lang: Option<String>,
+}
+
+pub async fn export_test_pdf(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Query(query): Query<TestPdfQuery>,
+) -> Result<impl IntoResponse> {
+    let test = state.test_service.get_test_by_id(id).await?;
+    let lang = query.lang.as_deref().unwrap_or("ru");
+    let buffer = crate::services::pdf_service::PdfService::generate_test_pdf(&test, lang)?;
+
+    let stem = slugify(&test.title);
+    let filename = format!("{}_{}.pdf", stem, chrono::Utc::now().format("%Y%m%d"));
+    let encoded = percent_encode(&format!("{}.pdf", test.title.trim()));
+    let disposition = format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        filename, encoded
+    );
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        buffer,
+    ))
+}
+
+fn slugify(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('_');
+            last_dash = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "test".to_string()
+    } else {
+        trimmed.chars().take(60).collect()
+    }
+}
+
+fn percent_encode(input: &str) -> String {
+    let mut out = String::new();
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
 }
 
 pub async fn export_candidate(
