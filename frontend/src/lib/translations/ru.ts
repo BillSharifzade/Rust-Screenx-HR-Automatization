@@ -441,7 +441,7 @@ export const ru = {
                 profession_placeholder: "например, Rust Developer, Project Manager",
                 context: "Доп. контекст (опционально)",
                 prompt_placeholder: "например, Фокус на конкурентности и обработке ошибок",
-                num_questions: "Количество вопросов (макс 25)",
+                num_questions: "Количество вопросов (макс 200)",
                 submit: "Сгенерировать вопросы",
                 cancel: "Отмена",
                 generating: "ИИ генерирует вопросы... это займет около минуты, самое время выпить кофе :)"
@@ -522,6 +522,9 @@ export const ru = {
             attempts: "попыток",
             edit: "Изменить",
             send: "Отправить",
+            download_pdf: "Скачать PDF",
+            download_success: "PDF скачан",
+            download_error: "Не удалось скачать PDF",
             delete_confirm: "Удалить тест?",
             delete_desc: "Это действие нельзя отменить.",
             no_tests: "Тесты не найдены",

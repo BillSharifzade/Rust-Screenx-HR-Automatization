@@ -3,7 +3,6 @@ use crate::models::response::{Response, ResponseCard};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Minimal row used by the AI grading worker.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UngradedResponse {
     pub id: Uuid,
@@ -21,7 +20,6 @@ impl ResponseService {
         Self { pool }
     }
 
-    /// Kanban feed: every response joined with its candidate, newest first.
     pub async fn list(&self) -> Result<Vec<ResponseCard>> {
         let rows = sqlx::query_as::<_, ResponseCard>(
             r#"
@@ -53,8 +51,6 @@ impl ResponseService {
         Ok(row)
     }
 
-    /// Apply a partial update from the kanban (any field may be None = leave unchanged).
-    /// `decision` is cleared to NULL when the status moves away from final_decision.
     pub async fn update(
         &self,
         id: Uuid,
@@ -89,7 +85,6 @@ impl ResponseService {
         Ok(row)
     }
 
-    /// Create response rows for any application that doesn't have one yet. Returns how many.
     pub async fn reconcile_missing(&self) -> Result<u64> {
         let res = sqlx::query(
             r#"
@@ -107,7 +102,6 @@ impl ResponseService {
         Ok(res.rows_affected())
     }
 
-    /// Responses that have never been through an AI grading attempt.
     pub async fn claim_ungraded(&self, limit: i64) -> Result<Vec<UngradedResponse>> {
         let rows = sqlx::query_as::<_, UngradedResponse>(
             "SELECT id, candidate_id, vacancy_id FROM responses \
@@ -140,7 +134,6 @@ impl ResponseService {
         Ok(())
     }
 
-    /// Mark that AI grading was attempted but failed, so the worker won't loop on it.
     pub async fn mark_ai_failed(&self, id: Uuid, note: Option<String>) -> Result<()> {
         sqlx::query(
             "UPDATE responses SET ai_graded_at = NOW(), \
