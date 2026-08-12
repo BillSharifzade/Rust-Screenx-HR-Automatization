@@ -44,6 +44,17 @@ interface TestInvite {
     expires_at: string;
 }
 
+interface InvitesResponse {
+    items: TestInvite[];
+    total: number;
+    page: number;
+    limit: number;
+    total_pages: number;
+    status_counts: Record<string, number>;
+}
+
+const RECENT_INVITES = 5;
+
 function InvitesPageContent() {
     const { t } = useTranslation();
     const queryClient = useQueryClient();
@@ -58,9 +69,10 @@ function InvitesPageContent() {
 
     const testIdFromUrl = searchParams.get('test');
 
+    // The selector needs every test, not just the first page.
     const { data: testsList, isLoading: testsLoading } = useQuery({
-        queryKey: ['tests'],
-        queryFn: () => apiFetch<{ items: Test[] }>('/api/integration/tests?per_page=100'),
+        queryKey: ['tests', 'all'],
+        queryFn: () => apiFetch<Test[]>('/api/integration/tests/all'),
     });
 
     const { data: specificTest } = useQuery({
@@ -70,7 +82,7 @@ function InvitesPageContent() {
     });
 
     const allTests = useMemo(() => {
-        const list = testsList?.items || [];
+        const list = testsList || [];
         if (specificTest && specificTest.id && !list.find(t => t.id === specificTest.id)) {
             return [specificTest, ...list];
         }
@@ -97,9 +109,14 @@ function InvitesPageContent() {
         queryFn: () => apiFetch<Candidate[]>('/api/integration/candidates'),
     });
 
+    // Only the most recent invites are rendered here; the stat cards use the
+    // server-side counts so they stay correct beyond the fetched page.
     const { data: invites, isLoading: invitesLoading } = useQuery({
-        queryKey: ['test-invites'],
-        queryFn: () => apiFetch<{ items: TestInvite[] }>('/api/integration/test-invites'),
+        queryKey: ['test-invites', RECENT_INVITES],
+        queryFn: () =>
+            apiFetch<InvitesResponse>('/api/integration/test-invites', {
+                params: { page: 1, limit: RECENT_INVITES },
+            }),
     });
 
     // Load candidate from URL params if present
@@ -251,13 +268,13 @@ function InvitesPageContent() {
         return allTests.find((t: Test) => t.id === testId)?.title || t('common.unknown');
     };
 
-    // Stats
+    // Stats come from server-side counts over all invites, not the rendered page.
     const stats = useMemo(() => {
-        if (!invites?.items) return { total: 0, pending: 0, completed: 0 };
+        const counts = invites?.status_counts || {};
         return {
-            total: invites.items.length,
-            pending: invites.items.filter(i => i.status === 'pending').length,
-            completed: invites.items.filter(i => i.status === 'completed').length,
+            total: invites?.total ?? 0,
+            pending: counts.pending ?? 0,
+            completed: counts.completed ?? 0,
         };
     }, [invites]);
 
@@ -494,7 +511,7 @@ function InvitesPageContent() {
                             </div>
                         ) : invites?.items && invites.items.length > 0 ? (
                             <div className="space-y-3">
-                                {invites.items.slice(0, 5).map((invite) => (
+                                {invites.items.map((invite) => (
                                     <div
                                         key={invite.id}
                                         className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"

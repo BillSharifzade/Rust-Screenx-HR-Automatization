@@ -1,7 +1,9 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { Pagination } from '@/components/ui/pagination';
 import { VacancyPublicListResponse } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,11 +12,32 @@ import { Building2, MapPin, DollarSign, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 
+const PER_PAGE = 20;
+
 export default function PublicVacanciesPage() {
-    const { data, isLoading, error } = useQuery({
-        queryKey: ['public-vacancies'],
-        queryFn: () => apiFetch<VacancyPublicListResponse>('/api/public/vacancies'),
+    const [page, setPage] = useState(1);
+
+    const { data, isLoading, isFetching, error } = useQuery({
+        queryKey: ['public-vacancies', page, PER_PAGE],
+        queryFn: () =>
+            apiFetch<VacancyPublicListResponse>('/api/public/vacancies', {
+                params: { page, per_page: PER_PAGE },
+            }),
+        placeholderData: keepPreviousData,
     });
+
+    const total = data?.total ?? 0;
+    const totalPages = data?.total_pages ?? 1;
+
+    useEffect(() => {
+        if (totalPages > 0 && page > totalPages) {
+            setPage(totalPages);
+        }
+    }, [page, totalPages]);
+
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [page]);
 
     if (isLoading) {
         return <div className="container mx-auto py-10">Loading opportunities...</div>;
@@ -93,6 +116,18 @@ export default function PublicVacanciesPage() {
                             В данный момент открытых вакансий нет. Пожалуйста, заходите позже.
                         </div>
                     )}
+
+                    <Pagination
+                        page={page}
+                        totalPages={totalPages}
+                        onPageChange={setPage}
+                        disabled={isFetching}
+                        caption={
+                            total > 0
+                                ? `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} / ${total}`
+                                : null
+                        }
+                    />
                 </div>
             )}
         </div>

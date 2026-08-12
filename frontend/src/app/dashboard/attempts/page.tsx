@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Pagination } from '@/components/ui/pagination';
 
 interface TestAttempt {
     id: string;
@@ -41,23 +42,38 @@ interface TestAttemptsResponse {
     total: number;
     page: number;
     limit: number;
+    total_pages: number;
 }
+
+const PER_PAGE = 20;
 
 export default function TestAttemptsPage() {
     const { t, language } = useTranslation();
     const dateLocale = language === 'ru' ? ruLocale : enUS;
     const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [page, setPage] = useState(1);
 
-    const { data, isLoading, error } = useQuery({
-        queryKey: ['test-attempts', statusFilter],
-        queryFn: () => {
-            const url = new URL('/api/integration/test-attempts', window.location.origin);
-            if (statusFilter !== 'all') {
-                url.searchParams.append('status', statusFilter);
-            }
-            return apiFetch<TestAttemptsResponse>(url.toString());
-        },
+    const { data, isLoading, isFetching, error } = useQuery({
+        queryKey: ['test-attempts', statusFilter, page, PER_PAGE],
+        queryFn: () =>
+            apiFetch<TestAttemptsResponse>('/api/integration/test-attempts', {
+                params: {
+                    status: statusFilter !== 'all' ? statusFilter : undefined,
+                    page,
+                    limit: PER_PAGE,
+                },
+            }),
+        placeholderData: keepPreviousData,
     });
+
+    const total = data?.total ?? 0;
+    const totalPages = data?.total_pages ?? 1;
+
+    useEffect(() => {
+        if (totalPages > 0 && page > totalPages) {
+            setPage(totalPages);
+        }
+    }, [page, totalPages]);
 
 
 
@@ -138,7 +154,13 @@ export default function TestAttemptsPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <Select
+                        value={statusFilter}
+                        onValueChange={(value) => {
+                            setStatusFilter(value);
+                            setPage(1);
+                        }}
+                    >
                         <SelectTrigger className="w-[180px]">
                             <SelectValue placeholder={t('common.filter') || "Filter"} />
                         </SelectTrigger>
@@ -234,6 +256,18 @@ export default function TestAttemptsPage() {
                     </Card>
                 )}
             </div>
+
+            <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                disabled={isFetching}
+                caption={
+                    total > 0
+                        ? `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} / ${total}`
+                        : null
+                }
+            />
         </div>
     );
 }

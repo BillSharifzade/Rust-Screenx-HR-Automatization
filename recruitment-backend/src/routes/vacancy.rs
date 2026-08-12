@@ -125,7 +125,9 @@ pub async fn get_vacancy(
     get,
     path = "/api/public/vacancies",
     params(
-        ("limit" = Option<i64>, Query, description = "Number of items to return")
+        ("page" = Option<i64>, Query, description = "Page number, 1-based"),
+        ("per_page" = Option<i64>, Query, description = "Items per page"),
+        ("limit" = Option<i64>, Query, description = "Deprecated alias for per_page")
     ),
     responses(
         (status = 200, description = "List of public vacancies", body = Json<VacancyPublicListResponse>)
@@ -136,10 +138,28 @@ pub async fn list_public_vacancies(
     State(state): State<AppState>,
     Query(query): Query<VacancyPublicQuery>,
 ) -> Result<impl IntoResponse> {
-    let limit = query.limit.unwrap_or(20).min(100);
-    let items = state.vacancy_service.list_published(limit).await?;
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query
+        .per_page
+        .or(query.limit)
+        .unwrap_or(20)
+        .clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    let (items, total) = state
+        .vacancy_service
+        .list_published(per_page, offset)
+        .await?;
     let summaries: Vec<VacancyPublicSummary> = items.into_iter().map(Into::into).collect();
-    Ok(Json(VacancyPublicListResponse { items: summaries }))
+    let total_pages = ((total as f64) / (per_page as f64)).ceil() as i64;
+
+    Ok(Json(VacancyPublicListResponse {
+        items: summaries,
+        total,
+        page,
+        per_page,
+        total_pages,
+    }))
 }
 
 #[utoipa::path(

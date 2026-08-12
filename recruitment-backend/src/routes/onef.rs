@@ -188,7 +188,7 @@ pub async fn get_dashboard_stats(
         .map(|(_, count)| *count)
         .unwrap_or(0);
 
-    let internal_vacancies = state.vacancy_service.list_published(50).await?.len() as i64;
+    let internal_vacancies = state.vacancy_service.count_published().await?;
     let external_vacancies = state.koinotinav_service.fetch_vacancies().await.map(|v| v.len() as i64).unwrap_or(0);
     let active_vacancies = internal_vacancies + external_vacancies;
     
@@ -352,7 +352,7 @@ pub async fn list_all_attempts(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
-    let (items, _) = svc.list_attempts(None, None, None, 1, 1000).await?;
+    let items = svc.list_all_attempts(None, None, None).await?;
 
     Ok(Json(items))
 }
@@ -377,7 +377,7 @@ pub async fn list_vacancies(
 ) -> Result<impl IntoResponse> {
     let mut combined = Vec::new();
 
-    if let Ok(internal) = state.vacancy_service.list_published(100).await {
+    if let Ok(internal) = state.vacancy_service.list_all_published().await {
         for v in internal {
             combined.push(serde_json::json!({
                 "id": v.id.to_string(),

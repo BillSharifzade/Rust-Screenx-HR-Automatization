@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatText } from '@/lib/utils';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, downloadTestPdf } from '@/lib/api';
 import { Test } from '@/types/api';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRouter } from 'next/navigation';
 import { useTranslation } from '@/lib/i18n-context';
+import { Pagination } from '@/components/ui/pagination';
+
+const PER_PAGE = 10;
+
+interface TestsResponse {
+    items: Test[];
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+}
 
 export default function TestsPage() {
     const { t, language } = useTranslation();
@@ -36,11 +47,27 @@ export default function TestsPage() {
     const queryClient = useQueryClient();
     const router = useRouter();
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
+    const [page, setPage] = useState(1);
 
-    const { data, isLoading, error } = useQuery({
-        queryKey: ['tests'],
-        queryFn: () => apiFetch<{ items: Test[] }>('/api/integration/tests'),
+    const { data, isLoading, isFetching, error } = useQuery({
+        queryKey: ['tests', page, PER_PAGE],
+        queryFn: () =>
+            apiFetch<TestsResponse>('/api/integration/tests', {
+                params: { page, per_page: PER_PAGE },
+            }),
+        placeholderData: keepPreviousData,
     });
+
+    const total = data?.total ?? 0;
+    const totalPages = data?.total_pages ?? 1;
+
+    // Deleting the last item on a page (or a shrinking list) would otherwise
+    // leave the user stranded on an empty page.
+    useEffect(() => {
+        if (totalPages > 0 && page > totalPages) {
+            setPage(totalPages);
+        }
+    }, [page, totalPages]);
 
     const deleteMutation = useMutation({
         mutationFn: (id: string) => apiFetch(`/api/integration/tests/${id}`, { method: 'DELETE' }),
@@ -232,6 +259,18 @@ export default function TestsPage() {
                     </div>
                 )}
             </div>
+
+            <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                disabled={isFetching}
+                caption={
+                    total > 0
+                        ? `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} / ${total}`
+                        : null
+                }
+            />
         </div>
     );
 }

@@ -346,6 +346,37 @@ impl AttemptService {
         Ok((rows, total))
     }
 
+    pub async fn list_all_attempts(
+        &self,
+        test_id: Option<Uuid>,
+        candidate_email: Option<String>,
+        status: Option<String>,
+    ) -> Result<Vec<TestAttempt>> {
+        const CHUNK: i64 = 500;
+
+        let mut all: Vec<TestAttempt> = Vec::new();
+        let mut page = 1;
+        loop {
+            let (rows, total) = self
+                .list_attempts(
+                    test_id,
+                    candidate_email.clone(),
+                    status.clone(),
+                    page,
+                    CHUNK,
+                )
+                .await?;
+            let fetched = rows.len() as i64;
+            all.extend(rows);
+            if fetched < CHUNK || (all.len() as i64) >= total {
+                break;
+            }
+            page += 1;
+        }
+
+        Ok(all)
+    }
+
     pub async fn delete_attempt(&self, attempt_id: Uuid) -> Result<()> {
         let attempt = self.get_attempt_by_id(attempt_id).await?;
         if attempt.status != "pending" {
