@@ -81,6 +81,10 @@ export interface VacancyPublicSummary {
 
 export interface VacancyPublicListResponse {
   items: VacancyPublicSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
 }
 
 export interface VacancyListResponse {

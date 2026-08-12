@@ -258,15 +258,28 @@ pub async fn create_test_invite(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+#[derive(Debug, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ListInvitesQuery {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
 #[axum::debug_handler]
 pub async fn list_test_invites(
     State(state): State<AppState>,
+    Query(q): Query<ListInvitesQuery>,
 ) -> Result<impl IntoResponse> {
+    let page = q.page.unwrap_or(1).max(1);
+    let limit = q.limit.unwrap_or(20).clamp(1, 100);
+
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
-    let (items, _total) = svc
-        .list_attempts(None, None, None, 1, 100)
+    let (items, total) = svc
+        .list_attempts(None, None, None, page, limit)
         .await?;
-    
+
+    let status_counts = svc.get_status_distribution().await.unwrap_or_default();
+
     let invites: Vec<serde_json::Value> = items.iter().map(|a| {
         serde_json::json!({
             "id": a.id,
@@ -278,8 +291,17 @@ pub async fn list_test_invites(
             "expires_at": a.expires_at,
         })
     }).collect();
-    
-    Ok(Json(serde_json::json!({ "items": invites })))
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as i64;
+
+    Ok(Json(serde_json::json!({
+        "items": invites,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "status_counts": status_counts,
+    })))
 }
 
 pub async fn get_test_attempt_by_id(
@@ -683,8 +705,8 @@ pub async fn get_dashboard_stats(
         })
     ).await?;
     let active_tests = tests_list.total;
-    let internal_active_vacancies = match state.vacancy_service.list_published(1000).await {
-        Ok(v) => v.len() as i64,
+    let internal_active_vacancies = match state.vacancy_service.count_published().await {
+        Ok(count) => count,
         Err(e) => {
             tracing::error!("Failed to fetch vacancies for dashboard: {:?}", e);
             0
@@ -922,11 +944,25 @@ pub async fn poll_notifications(
 
 
 
+/// Every test, page by page — used by selectors that must not miss an entry.
 pub async fn list_all_tests(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
-    let result = state.test_service.list_tests(1, 1000, None).await?;
-    Ok(Json(result.tests))
+    const CHUNK: i64 = 200;
+
+    let mut all = Vec::new();
+    let mut page = 1;
+    loop {
+        let result = state.test_service.list_tests(page, CHUNK, None).await?;
+        let fetched = result.tests.len() as i64;
+        all.extend(result.tests);
+        if fetched < CHUNK || page >= result.total_pages {
+            break;
+        }
+        page += 1;
+    }
+
+    Ok(Json(all))
 }
 
 
@@ -935,10 +971,10 @@ pub async fn list_attempts_for_review(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse> {
     let svc = crate::services::attempt_service::AttemptService::new(state.pool.clone());
-    let (items, _total) = svc
-        .list_attempts(None, None, Some("needs_review".to_string()), 1, 100)
+    let items = svc
+        .list_all_attempts(None, None, Some("needs_review".to_string()))
         .await?;
-    
+
     Ok(Json(items))
 }
 

@@ -260,22 +260,50 @@ impl VacancyService {
         Ok(res)
     }
 
-    pub async fn list_published(&self, limit: i64) -> Result<Vec<Vacancy>> {
+    const PUBLISHED_COLUMNS: &'static str = "id, external_id, title, company, location, employment_type, salary_from, salary_to, currency, negotiated_salary, description, requirements, responsibilities, benefits, apply_url, contact_email, contact_phone, status, published_at, created_at, updated_at";
+
+    pub async fn list_published(&self, limit: i64, offset: i64) -> Result<(Vec<Vacancy>, i64)> {
         let limit = if limit <= 0 { 20 } else { limit.min(100) };
-        let items = sqlx::query_as!(
-            Vacancy,
-            r#"
-            SELECT id, external_id, title, company, location, employment_type, salary_from, salary_to, currency, negotiated_salary, description, requirements, responsibilities, benefits, apply_url, contact_email, contact_phone, status, published_at, created_at, updated_at
-            FROM vacancies
-            WHERE status = 'published'
-            ORDER BY COALESCE(published_at, created_at) DESC
-            LIMIT $1
-            "#,
-            limit
-        )
+        let offset = offset.max(0);
+
+        let items = sqlx::query_as::<_, Vacancy>(&format!(
+            "SELECT {}
+             FROM vacancies
+             WHERE status = 'published'
+             ORDER BY COALESCE(published_at, created_at) DESC
+             LIMIT $1 OFFSET $2",
+            Self::PUBLISHED_COLUMNS
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let total = self.count_published().await?;
+
+        Ok((items, total))
+    }
+
+    pub async fn list_all_published(&self) -> Result<Vec<Vacancy>> {
+        let items = sqlx::query_as::<_, Vacancy>(&format!(
+            "SELECT {}
+             FROM vacancies
+             WHERE status = 'published'
+             ORDER BY COALESCE(published_at, created_at) DESC",
+            Self::PUBLISHED_COLUMNS
+        ))
         .fetch_all(&self.pool)
         .await?;
 
         Ok(items)
+    }
+
+    pub async fn count_published(&self) -> Result<i64> {
+        let total =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM vacancies WHERE status = 'published'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        Ok(total)
     }
 }

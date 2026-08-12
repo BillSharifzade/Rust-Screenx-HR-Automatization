@@ -111,6 +111,10 @@ pub struct VacancyListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VacancyPublicListResponse {
     pub items: Vec<VacancyPublicSummary>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+    pub total_pages: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -126,6 +130,8 @@ pub struct VacancyListQuery {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct VacancyPublicQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
     pub limit: Option<i64>,
 }
 
