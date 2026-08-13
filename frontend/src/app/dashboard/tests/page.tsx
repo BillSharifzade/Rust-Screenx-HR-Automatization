@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
     Plus, Clock, Trash2, Edit, Send, Download, Loader2,
-    Calendar, ListChecks, AlertCircle
+    Calendar, ListChecks, AlertCircle, FileText
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { enUS, ru as ruLocale } from 'date-fns/locale';
@@ -47,6 +47,7 @@ export default function TestsPage() {
     const queryClient = useQueryClient();
     const router = useRouter();
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
+    const [downloadingAll, setDownloadingAll] = useState(false);
     const [page, setPage] = useState(1);
 
     const { data, isLoading, isFetching, error } = useQuery({
@@ -96,6 +97,26 @@ export default function TestsPage() {
         }
     };
 
+    // Exports every test, not just the current page, so it fetches the unpaginated list.
+    const handleDownloadAll = async () => {
+        setDownloadingAll(true);
+        const toastId = toast.loading(t('dashboard.tests.download_all_progress'));
+        try {
+            const allTests = await apiFetch<Test[]>('/api/integration/tests/all');
+            if (!Array.isArray(allTests) || allTests.length === 0) {
+                toast.warning(t('dashboard.tests.download_all_empty'), { id: toastId });
+                return;
+            }
+            const { downloadAllTestsDocx } = await import('@/lib/tests-docx');
+            await downloadAllTestsDocx(allTests, language);
+            toast.success(t('dashboard.tests.download_all_success'), { id: toastId });
+        } catch (err) {
+            toast.error(`${t('dashboard.tests.download_all_error')}: ${(err as Error).message}`, { id: toastId });
+        } finally {
+            setDownloadingAll(false);
+        }
+    };
+
     if (isLoading) {
         return <div>{t('common.loading')}</div>;
     }
@@ -114,6 +135,19 @@ export default function TestsPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Button
+                        variant="outline"
+                        onClick={handleDownloadAll}
+                        disabled={downloadingAll}
+                        title={t('dashboard.tests.download_all')}
+                    >
+                        {downloadingAll ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <FileText className="mr-2 h-4 w-4" />
+                        )}
+                        {t('dashboard.tests.download_all')}
+                    </Button>
                     <Link href="/dashboard/tests/presentation/new">
                         <Button variant="outline">
                             <Plus className="mr-2 h-4 w-4" />
