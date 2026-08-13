@@ -19,6 +19,7 @@ const CORRECT: Color = Color::Rgb(21, 128, 61);
 pub struct PdfService;
 
 struct Labels {
+    brand: &'static str,
     duration: &'static str,
     minutes: &'static str,
     hours: &'static str,
@@ -40,6 +41,21 @@ struct Labels {
     points_many: &'static str,
     page: &'static str,
     no_questions: &'static str,
+    catalogue_title: &'static str,
+    catalogue_subtitle: &'static str,
+    generated: &'static str,
+    contents: &'static str,
+    index_no: &'static str,
+    index_title: &'static str,
+    index_type: &'static str,
+    index_volume: &'static str,
+    total_tests: &'static str,
+    total_questions: &'static str,
+    total_duration: &'static str,
+    type_test: &'static str,
+    type_presentation: &'static str,
+    archived: &'static str,
+    no_tests: &'static str,
 }
 
 impl Labels {
@@ -57,6 +73,7 @@ impl Labels {
 }
 
 const RU: Labels = Labels {
+    brand: "KoinotHR",
     duration: "Длительность",
     minutes: "мин",
     hours: "ч",
@@ -78,9 +95,25 @@ const RU: Labels = Labels {
     points_many: "баллов",
     page: "Стр.",
     no_questions: "В тесте нет вопросов",
+    catalogue_title: "Каталог тестов",
+    catalogue_subtitle: "Полный сборник оценочных материалов",
+    generated: "Сформировано",
+    contents: "Содержание",
+    index_no: "№",
+    index_title: "Название",
+    index_type: "Тип",
+    index_volume: "Объём",
+    total_tests: "Тестов",
+    total_questions: "Вопросов",
+    total_duration: "Общее время",
+    type_test: "Тест",
+    type_presentation: "Презентация",
+    archived: "В архиве",
+    no_tests: "Тесты не найдены",
 };
 
 const EN: Labels = Labels {
+    brand: "KoinotHR",
     duration: "Duration",
     minutes: "min",
     hours: "h",
@@ -102,12 +135,58 @@ const EN: Labels = Labels {
     points_many: "points",
     page: "Page",
     no_questions: "This test has no questions",
+    catalogue_title: "Test Catalogue",
+    catalogue_subtitle: "Complete collection of assessment materials",
+    generated: "Generated",
+    contents: "Contents",
+    index_no: "#",
+    index_title: "Title",
+    index_type: "Type",
+    index_volume: "Volume",
+    total_tests: "Tests",
+    total_questions: "Questions",
+    total_duration: "Total time",
+    type_test: "Test",
+    type_presentation: "Presentation",
+    archived: "Archived",
+    no_tests: "No tests found",
 };
 
 impl PdfService {
     pub fn generate_test_pdf(test: &Test, lang: &str) -> Result<Vec<u8>> {
-        let labels = if lang.eq_ignore_ascii_case("en") { &EN } else { &RU };
+        let labels = labels_for(lang);
+        let mut doc = Self::new_document(&transliterate(&strip_html(&test.title)), labels)?;
 
+        Self::push_test(&mut doc, test, None, labels);
+
+        Self::render(doc)
+    }
+
+    pub fn generate_tests_catalogue_pdf(tests: &[Test], lang: &str) -> Result<Vec<u8>> {
+        let labels = labels_for(lang);
+        let mut doc = Self::new_document(labels.catalogue_title, labels)?;
+
+        Self::push_cover(&mut doc, tests, labels);
+
+        if tests.is_empty() {
+            doc.push(
+                elements::Paragraph::new(labels.no_tests)
+                    .styled(Style::new().italic().with_font_size(10).with_color(MUTED)),
+            );
+            return Self::render(doc);
+        }
+
+        Self::push_contents(&mut doc, tests, labels)?;
+
+        for (idx, test) in tests.iter().enumerate() {
+            doc.push(elements::PageBreak::new());
+            Self::push_test(&mut doc, test, Some(idx + 1), labels);
+        }
+
+        Self::render(doc)
+    }
+
+    fn new_document(title: &str, labels: &Labels) -> Result<genpdf::Document> {
         let regular = fonts::FontData::new(FONT_REGULAR.to_vec(), None)
             .map_err(|e| Error::Internal(format!("font load failed: {}", e)))?;
         let bold = fonts::FontData::new(FONT_BOLD.to_vec(), None)
@@ -120,7 +199,7 @@ impl PdfService {
         let family = fonts::FontFamily { regular, bold, italic, bold_italic };
 
         let mut doc = genpdf::Document::new(family);
-        doc.set_title(transliterate(&strip_html(&test.title)));
+        doc.set_title(transliterate(title));
         doc.set_minimal_conformance();
         doc.set_font_size(10);
         doc.set_line_spacing(1.35);
@@ -142,24 +221,187 @@ impl PdfService {
         });
         doc.set_page_decorator(decorator);
 
-        Self::push_header(&mut doc, test, labels);
+        Ok(doc)
+    }
 
-        let is_presentation = test.test_type.as_deref() == Some("presentation");
-        if is_presentation {
-            Self::push_presentation_body(&mut doc, test, labels);
-        } else {
-            Self::push_questions(&mut doc, test, labels);
-        }
-
+    fn render(doc: genpdf::Document) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
         doc.render(&mut buffer)
             .map_err(|e| Error::Internal(format!("pdf render failed: {}", e)))?;
         Ok(buffer)
     }
 
-    fn push_header(doc: &mut genpdf::Document, test: &Test, labels: &Labels) {
+    fn push_test(doc: &mut genpdf::Document, test: &Test, number: Option<usize>, labels: &Labels) {
+        Self::push_header(doc, test, number, labels);
+
+        let is_presentation = test.test_type.as_deref() == Some("presentation");
+        if is_presentation {
+            Self::push_presentation_body(doc, test, labels);
+        } else {
+            Self::push_questions(doc, test, labels);
+        }
+    }
+
+    fn push_cover(doc: &mut genpdf::Document, tests: &[Test], labels: &Labels) {
+        let total_questions: usize = tests.iter().map(|t| questions_of(t).len()).sum();
+        let total_minutes: i32 = tests.iter().map(|t| t.duration_minutes).sum();
+
         doc.push(
-            elements::Paragraph::new(strip_html(&test.title))
+            elements::Paragraph::new(labels.brand.to_uppercase())
+                .styled(Style::new().bold().with_font_size(9).with_color(ACCENT)),
+        );
+        doc.push(elements::Break::new(0.4));
+        doc.push(
+            elements::Paragraph::new(labels.catalogue_title)
+                .styled(Style::new().bold().with_font_size(26).with_color(INK)),
+        );
+        doc.push(elements::Break::new(0.3));
+        doc.push(
+            elements::Paragraph::new(labels.catalogue_subtitle)
+                .styled(Style::new().with_font_size(11).with_color(MUTED)),
+        );
+        doc.push(elements::Break::new(0.3));
+        doc.push(
+            elements::Paragraph::new(format!(
+                "{}: {}",
+                labels.generated,
+                chrono::Utc::now().format("%d.%m.%Y")
+            ))
+            .styled(Style::new().with_font_size(9).with_color(MUTED)),
+        );
+        doc.push(elements::Break::new(0.8));
+        doc.push(
+            elements::Paragraph::new(format!(
+                "{}: {}   |   {}: {}   |   {}: {}",
+                labels.total_tests,
+                tests.len(),
+                labels.total_questions,
+                total_questions,
+                labels.total_duration,
+                total_duration(total_minutes, labels),
+            ))
+            .styled(Style::new().with_font_size(9).with_color(ACCENT))
+            .padded(Margins::trbl(2, 0, 2, 0))
+            .framed(),
+        );
+        doc.push(elements::Break::new(1.0));
+    }
+
+    fn push_contents(doc: &mut genpdf::Document, tests: &[Test], labels: &Labels) -> Result<()> {
+        doc.push(
+            elements::Paragraph::new(labels.contents)
+                .styled(Style::new().bold().with_font_size(14).with_color(INK)),
+        );
+        doc.push(elements::Break::new(0.5));
+
+        let header = Style::new().bold().with_font_size(8).with_color(MUTED);
+        let cell = Style::new().with_font_size(9).with_color(INK);
+        let muted_cell = Style::new().with_font_size(9).with_color(MUTED);
+
+        let mut table = elements::TableLayout::new(vec![1, 9, 3, 2, 2]);
+        table.set_cell_decorator(elements::FrameCellDecorator::new(false, true, false));
+
+        table
+            .row()
+            .element(
+                elements::Paragraph::new(labels.index_no.to_uppercase())
+                    .styled(header)
+                    .padded(Margins::trbl(1, 2, 1, 0)),
+            )
+            .element(
+                elements::Paragraph::new(labels.index_title.to_uppercase())
+                    .styled(header)
+                    .padded(Margins::trbl(1, 2, 1, 0)),
+            )
+            .element(
+                elements::Paragraph::new(labels.index_type.to_uppercase())
+                    .styled(header)
+                    .padded(Margins::trbl(1, 2, 1, 0)),
+            )
+            .element(
+                elements::Paragraph::new(labels.index_volume.to_uppercase())
+                    .styled(header)
+                    .padded(Margins::trbl(1, 2, 1, 0)),
+            )
+            .element(
+                elements::Paragraph::new(labels.duration.to_uppercase())
+                    .styled(header)
+                    .padded(Margins::trbl(1, 2, 1, 0)),
+            )
+            .push()
+            .map_err(|e| Error::Internal(format!("pdf table failed: {}", e)))?;
+
+        for (idx, test) in tests.iter().enumerate() {
+            let is_presentation = test.test_type.as_deref() == Some("presentation");
+            let volume = if is_presentation {
+                themes_of(test).len()
+            } else {
+                questions_of(test).len()
+            };
+            let kind = if is_presentation {
+                labels.type_presentation
+            } else {
+                labels.type_test
+            };
+
+            table
+                .row()
+                .element(
+                    elements::Paragraph::new(format!("{}", idx + 1))
+                        .styled(Style::new().bold().with_font_size(9).with_color(ACCENT))
+                        .padded(Margins::trbl(1, 2, 1, 0)),
+                )
+                .element(
+                    elements::Paragraph::new(strip_html(&test.title))
+                        .styled(cell)
+                        .padded(Margins::trbl(1, 2, 1, 0)),
+                )
+                .element(
+                    elements::Paragraph::new(kind)
+                        .styled(muted_cell)
+                        .padded(Margins::trbl(1, 2, 1, 0)),
+                )
+                .element(
+                    elements::Paragraph::new(format!("{}", volume))
+                        .styled(muted_cell)
+                        .padded(Margins::trbl(1, 2, 1, 0)),
+                )
+                .element(
+                    elements::Paragraph::new(duration_label(test, labels))
+                        .styled(muted_cell)
+                        .padded(Margins::trbl(1, 2, 1, 0)),
+                )
+                .push()
+                .map_err(|e| Error::Internal(format!("pdf table failed: {}", e)))?;
+        }
+
+        doc.push(table);
+        Ok(())
+    }
+
+    fn push_header(doc: &mut genpdf::Document, test: &Test, number: Option<usize>, labels: &Labels) {
+        let is_presentation = test.test_type.as_deref() == Some("presentation");
+        let mut badges = vec![if is_presentation {
+            labels.type_presentation
+        } else {
+            labels.type_test
+        }
+        .to_string()];
+        if test.is_active == Some(false) {
+            badges.push(labels.archived.to_string());
+        }
+        doc.push(
+            elements::Paragraph::new(format!("{}  ·  {}", labels.brand, badges.join("  ·  ")).to_uppercase())
+                .styled(Style::new().bold().with_font_size(8).with_color(ACCENT)),
+        );
+        doc.push(elements::Break::new(0.3));
+
+        let heading = match number {
+            Some(n) => format!("{}. {}", n, strip_html(&test.title)),
+            None => strip_html(&test.title),
+        };
+        doc.push(
+            elements::Paragraph::new(heading)
                 .styled(Style::new().bold().with_font_size(20).with_color(INK)),
         );
         doc.push(elements::Break::new(0.3));
@@ -193,11 +435,7 @@ impl PdfService {
 
     fn meta_line(test: &Test, labels: &Labels) -> String {
         let is_presentation = test.test_type.as_deref() == Some("presentation");
-        let duration = if is_presentation {
-            format!("{} {}", test.duration_minutes / 60, labels.hours)
-        } else {
-            format!("{} {}", test.duration_minutes, labels.minutes)
-        };
+        let duration = duration_label(test, labels);
 
         let count = if is_presentation {
             themes_of(test).len()
@@ -374,6 +612,32 @@ impl PdfService {
             doc.push(elements::Break::new(0.2));
         }
         doc.push(elements::Break::new(0.7));
+    }
+}
+
+fn labels_for(lang: &str) -> &'static Labels {
+    if lang.eq_ignore_ascii_case("en") {
+        &EN
+    } else {
+        &RU
+    }
+}
+
+fn duration_label(test: &Test, labels: &Labels) -> String {
+    if test.test_type.as_deref() == Some("presentation") {
+        format!("{} {}", test.duration_minutes / 60, labels.hours)
+    } else {
+        format!("{} {}", test.duration_minutes, labels.minutes)
+    }
+}
+
+fn total_duration(minutes: i32, labels: &Labels) -> String {
+    let hours = minutes / 60;
+    let rest = minutes % 60;
+    match (hours, rest) {
+        (0, _) => format!("{} {}", rest, labels.minutes),
+        (_, 0) => format!("{} {}", hours, labels.hours),
+        _ => format!("{} {} {} {}", hours, labels.hours, rest, labels.minutes),
     }
 }
 

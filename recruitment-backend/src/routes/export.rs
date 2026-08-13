@@ -45,6 +45,50 @@ pub async fn export_test_pdf(
     ))
 }
 
+pub async fn export_all_tests_pdf(
+    State(state): State<AppState>,
+    Query(query): Query<TestPdfQuery>,
+) -> Result<impl IntoResponse> {
+    const CHUNK: i64 = 200;
+
+    let mut tests = Vec::new();
+    let mut page = 1;
+    loop {
+        let result = state.test_service.list_tests(page, CHUNK, None).await?;
+        let fetched = result.tests.len() as i64;
+        tests.extend(result.tests);
+        if fetched < CHUNK || page >= result.total_pages {
+            break;
+        }
+        page += 1;
+    }
+
+    let lang = query.lang.as_deref().unwrap_or("ru");
+    let buffer = crate::services::pdf_service::PdfService::generate_tests_catalogue_pdf(&tests, lang)?;
+
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let filename = format!("tests_catalogue_{}.pdf", chrono::Utc::now().format("%Y%m%d"));
+    let title = if lang.eq_ignore_ascii_case("en") {
+        "Test catalogue"
+    } else {
+        "Каталог тестов"
+    };
+    let encoded = percent_encode(&format!("{} {}.pdf", title, date));
+    let disposition = format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        filename, encoded
+    );
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        buffer,
+    ))
+}
+
 fn slugify(input: &str) -> String {
     let mut out = String::new();
     let mut last_dash = false;

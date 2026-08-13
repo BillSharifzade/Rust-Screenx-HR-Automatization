@@ -204,6 +204,10 @@ async fn main() -> anyhow::Result<()> {
             get(routes::export::export_test_pdf),
         )
         .route(
+            "/api/integration/tests/all/pdf",
+            get(routes::export::export_all_tests_pdf),
+        )
+        .route(
             "/api/integration/tests/generate",
             post(routes::integration::generate_test_spec),
         )

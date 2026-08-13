@@ -93,12 +93,12 @@ function filenameFromDisposition(header: string | null, fallback: string): strin
     return asciiMatch ? asciiMatch[1].trim() : fallback;
 }
 
-export async function downloadTestPdf(id: string, lang: string, fallbackName: string): Promise<void> {
+/** Streams a binary endpoint straight to the browser's downloads. */
+async function downloadFromApi(path: string, fallbackName: string): Promise<string> {
     const token = tokenStore.getToken();
-    const response = await fetch(
-        `${BASE_URL}/api/integration/tests/${id}/pdf?lang=${encodeURIComponent(lang)}`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-    );
+    const response = await fetch(`${BASE_URL}${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
 
     if (!response.ok) {
         throw new Error(`API Error ${response.status}`);
@@ -118,6 +118,23 @@ export async function downloadTestPdf(id: string, lang: string, fallbackName: st
     anchor.click();
     document.body.removeChild(anchor);
     window.URL.revokeObjectURL(url);
+
+    return filename;
+}
+
+export async function downloadTestPdf(id: string, lang: string, fallbackName: string): Promise<string> {
+    return downloadFromApi(
+        `/api/integration/tests/${id}/pdf?lang=${encodeURIComponent(lang)}`,
+        fallbackName,
+    );
+}
+
+/** The whole test library as one PDF, rendered by the backend. */
+export async function downloadAllTestsPdf(lang: string, fallbackName: string): Promise<string> {
+    return downloadFromApi(
+        `/api/integration/tests/all/pdf?lang=${encodeURIComponent(lang)}`,
+        fallbackName,
+    );
 }
 
 // ---- Responses ("Отклики") kanban ----
