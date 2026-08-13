@@ -710,3 +710,103 @@ fn strip_html(input: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_test(title: &str, presentation: bool) -> Test {
+        let questions = if presentation {
+            json!([])
+        } else {
+            json!([
+                {
+                    "id": 1,
+                    "type": "multiple_choice",
+                    "question": "Какой тип данных неизменяемый?",
+                    "points": 2,
+                    "options": ["list", "dict", "tuple"],
+                    "correct_answer": 2,
+                    "explanation": "Кортежи нельзя изменить после создания."
+                },
+                {
+                    "id": 2,
+                    "type": "short_answer",
+                    "question": "Опишите разницу между list и generator",
+                    "points": 3,
+                    "expected_keywords": ["лениво", "память"],
+                    "min_words": 20,
+                    "ai_grading": true
+                },
+                {
+                    "id": 3,
+                    "type": "code",
+                    "question": "Reverse a string",
+                    "points": 5,
+                    "language": "python",
+                    "starter_code": "def reverse(s):\n    pass\n",
+                    "test_cases": []
+                }
+            ])
+        };
+
+        serde_json::from_value(json!({
+            "id": uuid::Uuid::new_v4(),
+            "external_id": null,
+            "title": title,
+            "description": "Проверка знаний основ Python",
+            "instructions": "Отвечайте самостоятельно",
+            "questions": questions,
+            "duration_minutes": if presentation { 120 } else { 45 },
+            "passing_score": "70.00",
+            "max_attempts": 2,
+            "shuffle_questions": false,
+            "shuffle_options": false,
+            "show_results_immediately": true,
+            "created_by": null,
+            "is_active": !presentation,
+            "test_type": if presentation { "presentation" } else { "question_based" },
+            "presentation_themes": if presentation { json!(["Анализ рынка", "Roadmap"]) } else { json!(null) },
+            "presentation_extra_info": if presentation { json!("15 минут на выступление") } else { json!(null) },
+            "created_at": "2026-05-02T10:00:00Z",
+            "updated_at": null
+        }))
+        .expect("sample test fixture should deserialize")
+    }
+
+    #[test]
+    fn fixture_questions_parse() {
+        assert_eq!(questions_of(&sample_test("T", false)).len(), 3);
+        assert_eq!(themes_of(&sample_test("P", true)).len(), 2);
+    }
+
+    #[test]
+    fn renders_single_test() {
+        for lang in ["ru", "en"] {
+            let pdf = PdfService::generate_test_pdf(&sample_test("Python", false), lang).unwrap();
+            assert!(pdf.starts_with(b"%PDF"), "{lang}: not a pdf");
+            assert!(pdf.len() > 2_000, "{lang}: suspiciously small pdf");
+        }
+    }
+
+    #[test]
+    fn renders_catalogue_of_every_test() {
+        let tests = vec![
+            sample_test("Python — базовый уровень", false),
+            sample_test("Презентация: стратегия", true),
+        ];
+
+        for lang in ["ru", "en"] {
+            let pdf = PdfService::generate_tests_catalogue_pdf(&tests, lang).unwrap();
+            assert!(pdf.starts_with(b"%PDF"), "{lang}: not a pdf");
+            assert!(pdf.len() > 5_000, "{lang}: suspiciously small catalogue");
+        }
+    }
+
+    #[test]
+    fn renders_empty_catalogue() {
+        let pdf = PdfService::generate_tests_catalogue_pdf(&[], "ru").unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
+    }
+}

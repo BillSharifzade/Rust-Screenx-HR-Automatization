@@ -94,13 +94,20 @@ export default function TestsPage() {
         if (!target) return;
 
         const all = target === 'all';
+        if (all && total === 0) {
+            toast.warning(t('dashboard.tests.download_all_empty'));
+            setExportTarget(null);
+            return;
+        }
+
         setExportingFormat(format);
         const toastId = toast.loading(t('dashboard.tests.export.progress'));
         try {
-            // "All" means every test, not just the current page, so it needs the
-            // unpaginated list — a single test is already on screen in full.
-            let tests: Test[] = [target as Test];
-            if (all) {
+            // The browser-side writers need every test, not just the current
+            // page, so an export of all tests fetches the unpaginated list. The
+            // PDF is rendered by the backend, which reads the library itself.
+            let tests: Test[] = all ? [] : [target as Test];
+            if (all && format !== 'pdf') {
                 const allTests = await apiFetch<Test[]>('/api/integration/tests/all');
                 if (!Array.isArray(allTests) || allTests.length === 0) {
                     toast.warning(t('dashboard.tests.download_all_empty'), { id: toastId });
@@ -110,7 +117,7 @@ export default function TestsPage() {
                 tests = allTests;
             }
 
-            await downloadTests(tests, language, format);
+            await downloadTests(tests, language, format, all ? 'library' : 'test');
             toast.success(t('dashboard.tests.export.success'), { id: toastId });
             setExportTarget(null);
         } catch (err) {
