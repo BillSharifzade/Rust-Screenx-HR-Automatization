@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { formatText } from '@/lib/utils';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch, downloadTestPdf } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
+import { ExportFormat, downloadTests } from '@/lib/tests-export';
+import { ExportFormatDialog } from '@/components/export-format-dialog';
 import { Test } from '@/types/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,9 +48,10 @@ export default function TestsPage() {
     const dateLocale = language === 'ru' ? ruLocale : enUS;
     const queryClient = useQueryClient();
     const router = useRouter();
-    const [downloadingId, setDownloadingId] = useState<string | null>(null);
-    const [downloadingAll, setDownloadingAll] = useState(false);
     const [page, setPage] = useState(1);
+    // Which download the format dialog is for: one test, or the whole library.
+    const [exportTarget, setExportTarget] = useState<Test | 'all' | null>(null);
+    const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
 
     const { data, isLoading, isFetching, error } = useQuery({
         queryKey: ['tests', page, PER_PAGE],
@@ -85,35 +88,35 @@ export default function TestsPage() {
         deleteMutation.mutate(id);
     };
 
-    const handleDownloadPdf = async (test: Test) => {
-        setDownloadingId(test.id);
-        try {
-            await downloadTestPdf(test.id, language, `${test.title}.pdf`);
-            toast.success(t('dashboard.tests.download_success'));
-        } catch (err) {
-            toast.error(`${t('dashboard.tests.download_error')}: ${(err as Error).message}`);
-        } finally {
-            setDownloadingId(null);
-        }
-    };
+    // Both download buttons open the same dialog; the format decides the writer.
+    const handleExport = async (format: ExportFormat) => {
+        const target = exportTarget;
+        if (!target) return;
 
-    // Exports every test, not just the current page, so it fetches the unpaginated list.
-    const handleDownloadAll = async () => {
-        setDownloadingAll(true);
-        const toastId = toast.loading(t('dashboard.tests.download_all_progress'));
+        const all = target === 'all';
+        setExportingFormat(format);
+        const toastId = toast.loading(t('dashboard.tests.export.progress'));
         try {
-            const allTests = await apiFetch<Test[]>('/api/integration/tests/all');
-            if (!Array.isArray(allTests) || allTests.length === 0) {
-                toast.warning(t('dashboard.tests.download_all_empty'), { id: toastId });
-                return;
+            // "All" means every test, not just the current page, so it needs the
+            // unpaginated list — a single test is already on screen in full.
+            let tests: Test[] = [target as Test];
+            if (all) {
+                const allTests = await apiFetch<Test[]>('/api/integration/tests/all');
+                if (!Array.isArray(allTests) || allTests.length === 0) {
+                    toast.warning(t('dashboard.tests.download_all_empty'), { id: toastId });
+                    setExportTarget(null);
+                    return;
+                }
+                tests = allTests;
             }
-            const { downloadAllTestsDocx } = await import('@/lib/tests-docx');
-            await downloadAllTestsDocx(allTests, language);
-            toast.success(t('dashboard.tests.download_all_success'), { id: toastId });
+
+            await downloadTests(tests, language, format);
+            toast.success(t('dashboard.tests.export.success'), { id: toastId });
+            setExportTarget(null);
         } catch (err) {
-            toast.error(`${t('dashboard.tests.download_all_error')}: ${(err as Error).message}`, { id: toastId });
+            toast.error(`${t('dashboard.tests.export.error')}: ${(err as Error).message}`, { id: toastId });
         } finally {
-            setDownloadingAll(false);
+            setExportingFormat(null);
         }
     };
 
@@ -137,11 +140,11 @@ export default function TestsPage() {
                 <div className="flex gap-2">
                     <Button
                         variant="outline"
-                        onClick={handleDownloadAll}
-                        disabled={downloadingAll}
+                        onClick={() => setExportTarget('all')}
+                        disabled={exportingFormat !== null}
                         title={t('dashboard.tests.download_all')}
                     >
-                        {downloadingAll ? (
+                        {exportTarget === 'all' && exportingFormat ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : (
                             <FileText className="mr-2 h-4 w-4" />
@@ -239,16 +242,16 @@ export default function TestsPage() {
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        disabled={downloadingId === test.id}
-                                        onClick={() => handleDownloadPdf(test)}
-                                        title={t('dashboard.tests.download_pdf')}
+                                        disabled={exportingFormat !== null}
+                                        onClick={() => setExportTarget(test)}
+                                        title={t('dashboard.tests.download')}
                                     >
-                                        {downloadingId === test.id ? (
+                                        {exportTarget !== 'all' && exportTarget?.id === test.id && exportingFormat ? (
                                             <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                                         ) : (
                                             <Download className="mr-2 h-3.5 w-3.5" />
                                         )}
-                                        {t('dashboard.tests.download_pdf')}
+                                        {t('dashboard.tests.download')}
                                     </Button>
 
                                     <Button
@@ -293,6 +296,25 @@ export default function TestsPage() {
                     </div>
                 )}
             </div>
+
+            <ExportFormatDialog
+                open={exportTarget !== null}
+                onOpenChange={(open) => {
+                    if (!open) setExportTarget(null);
+                }}
+                title={
+                    exportTarget === 'all'
+                        ? t('dashboard.tests.export.title_all')
+                        : t('dashboard.tests.export.title')
+                }
+                description={
+                    exportTarget && exportTarget !== 'all'
+                        ? `${t('dashboard.tests.export.description')} — ${exportTarget.title}`
+                        : t('dashboard.tests.export.description')
+                }
+                busyFormat={exportingFormat}
+                onSelect={handleExport}
+            />
 
             <Pagination
                 page={page}

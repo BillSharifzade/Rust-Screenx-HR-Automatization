@@ -1,16 +1,31 @@
 /**
- * Builds a single, print-ready Word document containing every test.
+ * Builds a print-ready Word document from one test or from the whole library.
  *
- * The layout mirrors the per-test PDF (see backend `pdf_service.rs`) so both
- * exports read the same, but is rebuilt with Word primitives: a cover sheet, a
- * contents table, then one page per test.
+ * The layout mirrors the PDF (see backend `pdf_service.rs`) so both exports read
+ * the same, but is rebuilt with Word primitives. A catalogue opens with a cover
+ * sheet and a contents table, then gives every test its own page; a single test
+ * skips straight to its own section.
  *
  * `docx` and `file-saver` are imported lazily so the ~500 KB writer only lands
  * in the bundle of users who actually press the button.
  */
 import type { IParagraphOptions, Paragraph as ParagraphNode, Table as TableNode } from 'docx';
 import { Test } from '@/types/api';
-import { formatText } from './utils';
+import {
+    DocQuestion,
+    Labels,
+    OPTION_LETTERS,
+    block,
+    durationLabel,
+    exportFileName,
+    formatDate,
+    inline,
+    isPresentation,
+    labelsFor,
+    questionsOf,
+    themesOf,
+    totalDurationLabel,
+} from './shared';
 
 type Node = ParagraphNode | TableNode;
 
@@ -26,232 +41,16 @@ const SURFACE_ACCENT = 'EFF4FF';
 const BODY_FONT = 'Calibri';
 const MONO_FONT = 'Consolas';
 
-const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
-
-/** Questions arrive as loose JSON: the details variant is flattened onto the object. */
-interface DocQuestion {
-    type?: 'multiple_choice' | 'code' | 'short_answer';
-    question?: string;
-    points?: number;
-    options?: string[];
-    correct_answer?: number;
-    explanation?: string | null;
-    expected_keywords?: string[] | null;
-    min_words?: number | null;
-    ai_grading?: boolean;
-    language?: string;
-    starter_code?: string | null;
-}
-
-interface Labels {
-    brand: string;
-    cover_title: string;
-    cover_subtitle: string;
-    generated: string;
-    contents: string;
-    index_no: string;
-    index_title: string;
-    index_type: string;
-    index_volume: string;
-    index_duration: string;
-    total_tests: string;
-    total_questions: string;
-    total_duration: string;
-    type_test: string;
-    type_presentation: string;
-    duration: string;
-    minutes: string;
-    hours: string;
-    questions: string;
-    section_questions: string;
-    passing_score: string;
-    attempts: string;
-    instructions: string;
-    themes: string;
-    extra_info: string;
-    answer_key: string;
-    open_answer: string;
-    min_words: string;
-    keywords: string;
-    ai_grading: string;
-    code_task: string;
-    language: string;
-    explanation: string;
-    archived: string;
-    no_questions: string;
-    no_description: string;
-    no_tests: string;
-    filename: string;
-    points: (n: number) => string;
-}
-
-const RU: Labels = {
-    brand: 'KoinotHR',
-    cover_title: 'Каталог тестов',
-    cover_subtitle: 'Полный сборник оценочных материалов',
-    generated: 'Сформировано',
-    contents: 'Содержание',
-    index_no: '№',
-    index_title: 'Название',
-    index_type: 'Тип',
-    index_volume: 'Объём',
-    index_duration: 'Время',
-    total_tests: 'Тестов',
-    total_questions: 'Вопросов',
-    total_duration: 'Общее время',
-    type_test: 'Тест',
-    type_presentation: 'Презентация',
-    duration: 'Длительность',
-    minutes: 'мин',
-    hours: 'ч',
-    questions: 'Вопросов',
-    section_questions: 'Вопросы',
-    passing_score: 'Проходной балл',
-    attempts: 'Попыток',
-    instructions: 'Инструкция',
-    themes: 'Темы презентации',
-    extra_info: 'Дополнительно',
-    answer_key: 'верный ответ',
-    open_answer: 'Развёрнутый ответ',
-    min_words: 'минимум слов',
-    keywords: 'Ключевые слова',
-    ai_grading: 'Проверка ИИ',
-    code_task: 'Задача на код',
-    language: 'Язык',
-    explanation: 'Пояснение',
-    archived: 'В архиве',
-    no_questions: 'В тесте нет вопросов',
-    no_description: 'Описание отсутствует',
-    no_tests: 'Тесты не найдены',
-    filename: 'Каталог тестов',
-    points: (n) => {
-        const abs = Math.abs(n);
-        if (abs % 100 >= 11 && abs % 100 <= 14) return 'баллов';
-        const last = abs % 10;
-        if (last === 1) return 'балл';
-        if (last >= 2 && last <= 4) return 'балла';
-        return 'баллов';
-    },
-};
-
-const EN: Labels = {
-    brand: 'KoinotHR',
-    cover_title: 'Test Catalogue',
-    cover_subtitle: 'Complete collection of assessment materials',
-    generated: 'Generated',
-    contents: 'Contents',
-    index_no: '#',
-    index_title: 'Title',
-    index_type: 'Type',
-    index_volume: 'Volume',
-    index_duration: 'Time',
-    total_tests: 'Tests',
-    total_questions: 'Questions',
-    total_duration: 'Total time',
-    type_test: 'Test',
-    type_presentation: 'Presentation',
-    duration: 'Duration',
-    minutes: 'min',
-    hours: 'h',
-    questions: 'Questions',
-    section_questions: 'Questions',
-    passing_score: 'Passing score',
-    attempts: 'Attempts',
-    instructions: 'Instructions',
-    themes: 'Presentation topics',
-    extra_info: 'Additional info',
-    answer_key: 'correct answer',
-    open_answer: 'Open answer',
-    min_words: 'minimum words',
-    keywords: 'Keywords',
-    ai_grading: 'AI grading',
-    code_task: 'Coding task',
-    language: 'Language',
-    explanation: 'Explanation',
-    archived: 'Archived',
-    no_questions: 'This test has no questions',
-    no_description: 'No description',
-    no_tests: 'No tests found',
-    filename: 'Test catalogue',
-    points: (n) => (Math.abs(n) === 1 ? 'point' : 'points'),
-};
-
-// ---- text helpers ----
-
-/** Strips markup and entities the rich-text editor may have left behind. */
-function stripHtml(input: string): string {
-    let text = input.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n');
-    text = text.replace(/<[^>]*>/g, '');
-    return text
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&');
-}
-
-/** Single-line text: collapses every run of whitespace. */
-function inline(input: string | null | undefined): string {
-    if (!input) return '';
-    return stripHtml(formatText(input)).replace(/\s+/g, ' ').trim();
-}
-
-/** Multi-line text: keeps paragraph breaks, tidies everything else. */
-function block(input: string | null | undefined): string[] {
-    if (!input) return [];
-    return stripHtml(formatText(input))
-        .split('\n')
-        .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
-        .filter((line, idx, all) => line.length > 0 || (idx > 0 && all[idx - 1].length > 0))
-        .filter((line, idx, all) => !(idx === all.length - 1 && line.length === 0));
-}
-
-function questionsOf(test: Test): DocQuestion[] {
-    return Array.isArray(test.questions) ? (test.questions as DocQuestion[]) : [];
-}
-
-function themesOf(test: Test): string[] {
-    return Array.isArray(test.presentation_themes) ? test.presentation_themes : [];
-}
-
-function isPresentation(test: Test): boolean {
-    return test.test_type === 'presentation';
-}
-
-function durationLabel(test: Test, labels: Labels): string {
-    return isPresentation(test)
-        ? `${Math.round((test.duration_minutes / 60) * 10) / 10} ${labels.hours}`
-        : `${test.duration_minutes} ${labels.minutes}`;
-}
-
-/** Turns a minute count into "2 ч 30 мин" / "2 h 30 min", dropping empty parts. */
-function totalDurationLabel(minutes: number, labels: Labels): string {
-    const hours = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    if (hours === 0) return `${rest} ${labels.minutes}`;
-    if (rest === 0) return `${hours} ${labels.hours}`;
-    return `${hours} ${labels.hours} ${rest} ${labels.minutes}`;
-}
-
-function formatDate(date: Date, lang: string): string {
-    return date.toLocaleDateString(lang === 'en' ? 'en-GB' : 'ru-RU', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-    });
-}
-
-/** Word chokes on \ / : * ? " < > | in filenames. */
-function safeFileName(name: string): string {
-    return name.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
-}
-
-/** Renders every test into one .docx, plus the file name it should be saved under. */
-export async function buildAllTestsDocx(
+/**
+ * Renders the given tests into one .docx, plus the file name it should be saved
+ * under. A single test is rendered on its own; two or more get the catalogue
+ * treatment (cover sheet + contents table).
+ */
+export async function buildTestsDocx(
     tests: Test[],
     lang: string,
 ): Promise<{ blob: Blob; fileName: string }> {
+    const single = tests.length === 1;
     const docx = await import('docx');
     const {
         AlignmentType,
@@ -275,7 +74,7 @@ export async function buildAllTestsDocx(
         convertMillimetersToTwip,
     } = docx;
 
-    const labels = lang === 'en' ? EN : RU;
+    const labels: Labels = labelsFor(lang);
     const now = new Date();
 
     // A4 minus the left/right margins declared in `pageSetup`.
@@ -745,8 +544,11 @@ export async function buildAllTestsDocx(
         const questions = questionsOf(test);
         const themes = themesOf(test);
 
-        // Every test opens on a fresh page, contents included.
-        nodes.push(new Paragraph({ spacing: { after: 0 }, children: [new PageBreak()] }));
+        // In a catalogue every test opens on a fresh page, straight after the
+        // contents. A lone test is already at the top of the document.
+        if (!single) {
+            nodes.push(new Paragraph({ spacing: { after: 0 }, children: [new PageBreak()] }));
+        }
 
         const badges = [presentation ? labels.type_presentation : labels.type_test];
         if (test.is_active === false) badges.push(labels.archived);
@@ -757,7 +559,17 @@ export async function buildAllTestsDocx(
                 heading: HeadingLevel.HEADING_1,
                 spacing: { before: 0, after: 100 },
                 children: [
-                    new TextRun({ text: `${index + 1}.  `, size: 36, bold: true, color: ACCENT, font: BODY_FONT }),
+                    ...(single
+                        ? []
+                        : [
+                              new TextRun({
+                                  text: `${index + 1}.  `,
+                                  size: 36,
+                                  bold: true,
+                                  color: ACCENT,
+                                  font: BODY_FONT,
+                              }),
+                          ]),
                     new TextRun({ text: inline(test.title), size: 36, bold: true, color: INK, font: BODY_FONT }),
                 ],
             }),
@@ -835,7 +647,9 @@ export async function buildAllTestsDocx(
         return nodes;
     };
 
-    const documentTitle = `${labels.cover_title} · ${formatDate(now, lang)}`;
+    const documentTitle = single
+        ? `${inline(tests[0].title)} · ${formatDate(now, lang)}`
+        : `${labels.cover_title} · ${formatDate(now, lang)}`;
 
     const contentHeader = new Header({
         children: [
@@ -894,37 +708,32 @@ export async function buildAllTestsDocx(
                 },
             },
         },
-        sections: [
-            // Cover — no running header/footer.
-            { properties: { page: pageSetup }, children: cover },
-            // Contents + every test. Numbering continues from the cover so the
-            // "current / total" pair in the footer stays consistent.
-            {
-                properties: { page: pageSetup },
-                headers: { default: contentHeader },
-                footers: { default: contentFooter },
-                children:
-                    tests.length === 0
-                        ? [...contents, spacer(200), body(labels.no_tests, { color: MUTED, italics: true })]
-                        : [...contents, ...tests.flatMap((test, idx) => testBlock(test, idx))],
-            },
-        ],
+        sections: single
+            ? [
+                  {
+                      properties: { page: pageSetup },
+                      headers: { default: contentHeader },
+                      footers: { default: contentFooter },
+                      children: tests.flatMap((test, idx) => testBlock(test, idx)),
+                  },
+              ]
+            : [
+                  // Cover — no running header/footer.
+                  { properties: { page: pageSetup }, children: cover },
+                  // Contents + every test. Numbering continues from the cover so the
+                  // "current / total" pair in the footer stays consistent.
+                  {
+                      properties: { page: pageSetup },
+                      headers: { default: contentHeader },
+                      footers: { default: contentFooter },
+                      children:
+                          tests.length === 0
+                              ? [...contents, spacer(200), body(labels.no_tests, { color: MUTED, italics: true })]
+                              : [...contents, ...tests.flatMap((test, idx) => testBlock(test, idx))],
+                  },
+              ],
     });
 
     const blob = await Packer.toBlob(doc);
-    const fileName = safeFileName(`${labels.filename} ${now.toISOString().slice(0, 10)}.docx`);
-    return { blob, fileName };
-}
-
-/**
- * Builds the catalogue and hands it to the browser as a download.
- * Returns the file name it saved under.
- */
-export async function downloadAllTestsDocx(tests: Test[], lang: string): Promise<string> {
-    const [{ blob, fileName }, { saveAs }] = await Promise.all([
-        buildAllTestsDocx(tests, lang),
-        import('file-saver'),
-    ]);
-    saveAs(blob, fileName);
-    return fileName;
+    return { blob, fileName: exportFileName(tests, lang, 'docx') };
 }
