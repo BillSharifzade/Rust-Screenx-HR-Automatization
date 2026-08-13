@@ -29,28 +29,34 @@ async function save(blob: Blob, fileName: string): Promise<string> {
     return fileName;
 }
 
+/** A download covers either one test or the whole library. */
+export type ExportScope = 'test' | 'library';
+
 /**
  * Downloads `tests` in the chosen format and resolves with the saved file name.
  *
- * A single test is exported on its own; two or more are bundled into a
- * catalogue (cover sheet, contents, then one section per test).
+ * A single test is exported on its own; a library is bundled into a catalogue
+ * (cover sheet, contents, then one section per test). `tests` may be left empty
+ * for a PDF of the library — the backend reads it server-side.
  */
 export async function downloadTests(
     tests: Test[],
     lang: string,
     format: ExportFormat,
+    scope: ExportScope = 'test',
 ): Promise<string> {
+    if (format === 'pdf') {
+        const fallback = exportFileName(tests, lang, 'pdf');
+        return scope === 'library'
+            ? downloadAllTestsPdf(lang, fallback)
+            : downloadTestPdf(tests[0].id, lang, fallback);
+    }
+
     if (tests.length === 0) {
         throw new Error('No tests to export');
     }
 
     switch (format) {
-        case 'pdf': {
-            const fallback = exportFileName(tests, lang, 'pdf');
-            return tests.length === 1
-                ? downloadTestPdf(tests[0].id, lang, fallback)
-                : downloadAllTestsPdf(lang, fallback);
-        }
         case 'docx': {
             const { buildTestsDocx } = await import('./docx');
             const { blob, fileName } = await buildTestsDocx(tests, lang);
