@@ -180,16 +180,6 @@ pub fn sanitize_matches(raw: &JsonValue, allowed: &HashSet<i64>) -> Vec<VacancyM
         .unwrap_or_default();
 
     let mut seen = HashSet::new();
-
-pub fn sanitize_matches(raw: &JsonValue, allowed: &HashSet<i64>) -> Vec<VacancyMatch> {
-    let items = raw
-        .get("matches")
-        .and_then(JsonValue::as_array)
-        .or_else(|| raw.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let mut seen = HashSet::new();
     let mut out: Vec<VacancyMatch> = Vec::with_capacity(items.len());
 
     for item in items {
