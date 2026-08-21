@@ -1,13 +1,60 @@
 openapi: 3.0.3
 info:
   title: OneF Integration API
-  description: Internal API for OneF (1F) ERP to communicate with the Recruitment Platform.
-  version: 1.2.0
+  version: 1.3.0
+  description: |
+    API for OneF (1F) ERP to communicate with the Recruitment Platform.
+
+    ## Two directions of traffic
+
+    **1F → Platform.** Every path in this document is served by the Recruitment
+    Platform. Call them at the `servers` base URL below.
+
+    **Platform → 1F.** The platform also pushes events *to* 1F at
+    `http://192.168.1.47/app/v1.2/api/publications/action/…`
+    (`candidateResponse`, `postTestStatus`, `receivemessage`). Those payloads are
+    documented under the **Webhooks** tag — 1F implements the receiving side, not
+    this platform.
+
+    **Platform ← 1F (read).** The platform pulls the vacancy catalogue from
+    `GET http://192.168.1.47/app/v1.2/api/publications/action/getVacancies`.
+    That endpoint is served by 1F. Only that host serves it; the others answer 404.
+
+    ## Conventions
+
+    - Requests may be sent bare or wrapped in `{"requestBody": {...}}`. Both are accepted.
+    - `candidate_id` is always the platform UUID that 1F received in `new_application`
+      and every subsequent webhook. 1F's own candidate identifiers are not stored here.
+    - Vacancies carry two ids: `vacancy_id_1f` (1F's internal id, the stable key) and
+      `external_vacancy_id` (the job-board id, a numeric string). Both are returned
+      everywhere so either can be used to join.
+    - Rate limited to `INTEGRATION_RPS` requests per second (default 10).
+    - Errors are `{"error": "<message>"}` with a matching HTTP status.
 servers:
-  - url: http://192.168.1.47/app/v1.2/api/publications
-    description: OneF Internal Server
-  - url: http://10.10.10.25:8888/app/v1.2/api/publications
-    description: OneF External/VPN Server
+  - url: https://dchr.koinotinav.com/api/onef
+    description: Recruitment Platform — production
+  - url: http://{host}:8888/api/onef
+    description: Recruitment Platform — direct backend access on the internal network
+    variables:
+      host:
+        default: srv-dchr01
+
+tags:
+  - name: Matching
+    description: |
+      AI ranking of the 1F vacancy catalogue for a given candidate.
+
+      This is a self-contained subsystem: it keeps its own synced copy of 1F's
+      vacancies and does not touch the platform's own `/vacancies` records or the
+      application pipeline.
+  - name: Dashboard
+  - name: Candidates
+  - name: Messaging
+  - name: Tests
+  - name: Vacancies
+  - name: Dictionaries
+  - name: AI
+  - name: Webhooks
 
 paths:
   /dashboard:
@@ -295,49 +342,6 @@ paths:
                     type: string
                   test_title:
                     type: string
-
-    OneFAttempt:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        test_id:
-          type: string
-          format: uuid
-        candidate_name:
-          type: string
-        candidate_email:
-          type: string
-        status:
-          type: string
-        score:
-          type: number
-          nullable: true
-        max_score:
-          type: number
-          nullable: true
-        percentage:
-          type: number
-          nullable: true
-        passed:
-          type: boolean
-          nullable: true
-        started_at:
-          type: string
-          format: date-time
-          nullable: true
-        completed_at:
-          type: string
-          format: date-time
-          nullable: true
-        time_spent_seconds:
-          type: integer
-          nullable: true
-        result_url:
-          type: string
-          nullable: true
-          description: "URL to the test result report (TXT for simple tests or combined link/file for presentations)"
 
   /attempts_filter:
     get:
@@ -628,6 +632,156 @@ paths:
       responses:
         '200':
           description: OK
+
+  /matching/candidate:
+    post:
+      summary: Rank Vacancies For A Candidate (AI)
+      tags:
+        - Matching
+      description: |
+        Scores the entire 1F vacancy catalogue for one candidate and returns the best
+        matches, ordered from strongest to weakest.
+
+        **`candidate_id` is the platform UUID 1F already holds** — the `candidate.id`
+        sent in `new_application` and the `candidate_id` in every later webhook. No
+        candidate data is read from 1F; the profile is built from the CV stored here.
+
+        ### How a request is processed
+
+        1. The candidate is loaded from the platform database. Unknown UUID → `404`.
+        2. Their CV is read into a structured profile. Image CVs (png/jpg/webp) and
+           unreadable PDFs are processed with Vision automatically. This profile is
+           cached and re-extracted only when the CV or the candidate's details change.
+        3. **If the CV yields no professional information**, the response returns
+           `scoreable: false` with a `reason` and an empty `matches` array.
+           Always check `scoreable` before reading scores.
+        4. Otherwise every active vacancy is scored in a single comparative pass — they
+           are judged against each other, not in isolation — and the top `top_n`
+           are returned.
+
+        ### Caching
+
+        Repeat calls are served from stored results and cost nothing. A result is
+        recomputed when the candidate's CV changes, when the vacancy catalogue changes,
+        or when `force_refresh` is set. `cached` tells you which happened.
+
+        A cold call runs two AI requests and typically takes 5-15 seconds. Set your
+        client timeout to at least 60 seconds.
+
+        ### Age and gender
+
+        Age and gender **never influence the score**. They are reported in `flags` so a
+        recruiter can apply them as a human judgement:
+
+        - `age_mismatch` compares the vacancy's stated age band against the candidate's
+          date of birth. It is absent when the vacancy sets no age requirement or the
+          candidate has no date of birth on file.
+        - `gender_requirement` echoes what the vacancy asks for. The platform stores no
+          gender for candidates, so it is never compared.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFMatchRequest'
+            examples:
+              minimal:
+                summary: Minimal request
+                value:
+                  candidate_id: "a109320e-407e-4f26-936b-3a9bff5ed82f"
+              wrapped:
+                summary: Wrapped in requestBody, top 3, forced recompute
+                value:
+                  requestBody:
+                    candidate_id: "a109320e-407e-4f26-936b-3a9bff5ed82f"
+                    top_n: 3
+                    force_refresh: true
+      responses:
+        '200':
+          description: |
+            Ranking complete, or the candidate could not be scored. Check `scoreable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFMatchResult'
+        '400':
+          description: Malformed payload, or the vacancy catalogue is empty
+        '404':
+          description: No candidate with that UUID
+
+  /matching/vacancies:
+    get:
+      summary: List The Synced 1F Vacancy Catalogue
+      tags:
+        - Matching
+      description: |
+        The platform's local copy of `action/getVacancies`, refreshed on a timer.
+        Useful for confirming what the matcher is scoring against and when it last
+        synced. Withdrawn vacancies are kept with `is_active: false` rather than
+        deleted, so historical rankings still resolve.
+      parameters:
+        - in: query
+          name: include_inactive
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Also return vacancies 1F has stopped listing.
+      responses:
+        '200':
+          description: The catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFCatalogueList'
+
+  /matching/vacancies/{vacancy_id_1f}:
+    get:
+      summary: Get One Catalogue Vacancy
+      tags:
+        - Matching
+      parameters:
+        - in: path
+          name: vacancy_id_1f
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: 1F's internal vacancy id (`VacancyId1F`), not the job-board id.
+      responses:
+        '200':
+          description: The vacancy as stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFCatalogueVacancy'
+        '404':
+          description: Not in the catalogue
+
+  /matching/sync:
+    post:
+      summary: Refresh The Vacancy Catalogue Now
+      tags:
+        - Matching
+      description: |
+        Forces an immediate pull from `action/getVacancies` instead of waiting for the
+        timer. Use after publishing or editing a vacancy in 1F so the matcher sees it
+        without delay.
+
+        The sync is a full snapshot replace. If 1F returns an empty list it is treated
+        as a fault and the existing catalogue is left untouched — an empty catalogue is
+        never written.
+      responses:
+        '200':
+          description: What the sync changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFSyncSummary'
+        '400':
+          description: Catalogue reading is not configured
+        '502':
+          description: 1F could not be reached, or returned something unparseable
 
 components:
   schemas:
@@ -1135,3 +1289,399 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    OneFMatchRequest:
+      type: object
+      required:
+        - candidate_id
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+          description: |
+            The platform UUID 1F received in `new_application` (`candidate.id`) and in
+            every later webhook. Aliases `candidateId`, `CandidateId` and `id` are also
+            accepted.
+          example: "a109320e-407e-4f26-936b-3a9bff5ed82f"
+        top_n:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 50
+          description: How many of the best matches to return. All are scored regardless.
+        include_low_quality:
+          type: boolean
+          default: true
+          description: |
+            Whether to rank vacancies whose requirement text was placeholder or junk when
+            it was synced. They are included by default and every result carries
+            `flags.low_data_quality`; set false to leave them out of the ranking entirely.
+        force_refresh:
+          type: boolean
+          default: false
+          description: Recompute even if a cached ranking is still valid.
+
+    OneFMatchResult:
+      type: object
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+        candidate_name:
+          type: string
+        scoreable:
+          type: boolean
+          description: |
+            False when the CV yielded no professional information. `matches` is then
+            empty and `reason` explains why. **Check this before reading scores** —
+            ranking is skipped rather than producing numbers from no data.
+        reason:
+          type: string
+          nullable: true
+          description: Present only when `scoreable` is false. Russian, safe to show a recruiter.
+          example: "Из резюме (scan.png) не удалось извлечь данные для оценки."
+        cached:
+          type: boolean
+          description: True when served from a previous identical run.
+        computed_at:
+          type: string
+          format: date-time
+        catalogue_size:
+          type: integer
+          description: Active vacancies this candidate was scored against.
+        cv_chars:
+          type: integer
+          description: |
+            Characters of text extracted from the CV. `0` means nothing was extractable
+            and the profile came from Vision instead — not that the CV was empty.
+        profile:
+          $ref: '#/components/schemas/OneFCandidateProfile'
+        matches:
+          type: array
+          description: Best first. Empty when `scoreable` is false.
+          items:
+            $ref: '#/components/schemas/OneFScoredVacancy'
+
+    OneFCandidateProfile:
+      type: object
+      description: |
+        Reconstructed from the candidate's CV, since the platform stores no structured
+        education or experience fields. Cached per candidate and re-extracted only when
+        the CV changes. Any field may be null or empty — that means the CV did not say,
+        not that the candidate lacks it.
+      properties:
+        summary:
+          type: string
+          description: 2-3 sentences in Russian.
+        education_level:
+          type: string
+          nullable: true
+          enum: ["Высшее", "Неоконченное высшее", "Среднее специальное", "Среднее", null]
+        education_detail:
+          type: string
+          nullable: true
+        total_experience_years:
+          type: number
+          format: float
+          nullable: true
+        current_role:
+          type: string
+          nullable: true
+        specialties:
+          type: array
+          items:
+            type: string
+          example: ["Менеджмент и бизнес: Менеджмент"]
+        languages:
+          type: array
+          items:
+            type: string
+          example: ["Русский: свободный", "Английский: разговорный"]
+        computer_skills:
+          type: array
+          description: Tools and technologies the candidate uses.
+          items:
+            type: string
+        professional_skills:
+          type: array
+          description: What the candidate can do, as distinct from the tools they use.
+          items:
+            type: string
+        personal_qualities:
+          type: array
+          items:
+            type: string
+
+    OneFScoredVacancy:
+      type: object
+      properties:
+        vacancy_id_1f:
+          type: integer
+          format: int64
+          description: 1F's internal id (`VacancyId1F`).
+        external_vacancy_id:
+          type: string
+          nullable: true
+          description: The job-board id, as a numeric string.
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Overall fit. Bands: 0-30 fundamental mismatch, 31-60 partial overlap with key
+            requirements missing, 61-80 strong fit with gaps, 81-100 excellent fit.
+            Vacancies are judged against each other, so scores are meaningful as an
+            ordering within one response.
+        rank:
+          type: integer
+          description: 1 is the best match.
+        breakdown:
+          $ref: '#/components/schemas/OneFMatchBreakdown'
+        matched:
+          type: array
+          description: Concrete requirements the candidate meets.
+          items:
+            type: string
+        missing:
+          type: array
+          description: Concrete requirements the candidate does not meet.
+          items:
+            type: string
+        unknown:
+          type: array
+          description: |
+            Dimensions scored 50 because the CV said nothing about them. Lets a neutral
+            50 be told apart from a genuinely mediocre 50.
+          items:
+            type: string
+          example: ["experience"]
+        comment:
+          type: string
+          description: 1-2 blunt sentences in Russian, safe to show a recruiter.
+        flags:
+          $ref: '#/components/schemas/OneFMatchFlags'
+
+    OneFMatchBreakdown:
+      type: object
+      description: |
+        Per-dimension sub-scores, each 0-100. Specialty fit and professional skills weigh
+        most; personal qualities least. The overall `score` is a judgement, not an average
+        of these.
+      properties:
+        education:
+          type: integer
+        experience:
+          type: integer
+        professional_skills:
+          type: integer
+        languages:
+          type: integer
+        computer_skills:
+          type: integer
+        specialty:
+          type: integer
+        personal_qualities:
+          type: integer
+
+    OneFMatchFlags:
+      type: object
+      description: Reported alongside the score and never folded into it.
+      properties:
+        age_requirement:
+          type: string
+          nullable: true
+          description: The vacancy's stated age band. Absent when it sets none.
+          example: "от 20 до 30 лет"
+        age_mismatch:
+          type: boolean
+          nullable: true
+          description: |
+            Whether the candidate falls outside that band, computed from their date of
+            birth. Absent when the vacancy sets no age requirement or the candidate has
+            no date of birth on file. Never affects the score.
+        gender_requirement:
+          type: string
+          nullable: true
+          description: |
+            What the vacancy asks for. Echoed only — the platform stores no gender for
+            candidates, so it is never compared and never scored.
+          example: "Женский"
+        data_quality:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            How much real requirement content the vacancy carried when synced. Low values
+            mean placeholder text (a word repeated, random characters) rather than genuine
+            requirements.
+        low_data_quality:
+          type: boolean
+          description: True when `data_quality` is below 75. Treat that vacancy's score with caution.
+        low_confidence:
+          type: boolean
+          description: True when little or no text could be read from the candidate's CV.
+
+    OneFCatalogueVacancy:
+      type: object
+      description: One 1F vacancy as stored locally, after cleaning.
+      properties:
+        vacancy_id_1f:
+          type: integer
+          format: int64
+        external_vacancy_id:
+          type: string
+          nullable: true
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        specialty:
+          type: string
+          nullable: true
+        education:
+          type: string
+          nullable: true
+        experience:
+          type: string
+          nullable: true
+          example: "3–5 лет"
+        age:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          nullable: true
+        languages:
+          type: array
+          items:
+            type: string
+        computer_skills:
+          type: array
+          items:
+            type: string
+        professional_skills:
+          type: string
+          nullable: true
+        personal_qualities:
+          type: string
+          nullable: true
+        description_raw:
+          type: string
+          nullable: true
+          description: Exactly as 1F sent it, HTML entities and all.
+        description_clean:
+          type: string
+          nullable: true
+          description: Entities decoded, markup stripped, list formatting restored.
+        raw:
+          type: object
+          description: The untouched record from 1F, so newly added fields are never lost.
+        data_quality:
+          type: integer
+          description: 0-100 heuristic, see OneFMatchFlags.data_quality.
+        content_hash:
+          type: string
+          description: Changes only when the vacancy's content actually changes.
+        is_active:
+          type: boolean
+          description: False once 1F stops listing it. Withdrawn vacancies are kept, not deleted.
+        last_seen_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: Moves only on a real content change, not on every sync.
+
+    OneFCatalogueList:
+      type: object
+      properties:
+        active_count:
+          type: integer
+        total_count:
+          type: integer
+          description: Including withdrawn vacancies.
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        count:
+          type: integer
+          description: Items in this response.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OneFCatalogueVacancy'
+
+    OneFSyncSummary:
+      type: object
+      description: What one catalogue sync changed.
+      properties:
+        fetched:
+          type: integer
+          description: Records 1F returned.
+        skipped:
+          type: integer
+          description: Records that could not be parsed and were left out. The rest still sync.
+        inserted:
+          type: integer
+        updated:
+          type: integer
+          description: Already known, but the content changed.
+        unchanged:
+          type: integer
+        deactivated:
+          type: integer
+          description: No longer listed by 1F, marked inactive rather than deleted.
+
+    OneFAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        test_id:
+          type: string
+          format: uuid
+        candidate_name:
+          type: string
+        candidate_email:
+          type: string
+        status:
+          type: string
+        score:
+          type: number
+          nullable: true
+        max_score:
+          type: number
+          nullable: true
+        percentage:
+          type: number
+          nullable: true
+        passed:
+          type: boolean
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        time_spent_seconds:
+          type: integer
+          nullable: true
+        result_url:
+          type: string
+          nullable: true
+          description: "URL to the test result report (TXT for simple tests or combined link/file for presentations)"
