@@ -31,6 +31,7 @@ pub struct ScoredVacancy {
     pub breakdown: MatchBreakdown,
     pub matched: Vec<String>,
     pub missing: Vec<String>,
+    pub unknown: Vec<String>,
     pub comment: String,
     pub flags: MatchFlags,
 }
@@ -146,6 +147,7 @@ impl OneFMatchService {
                     breakdown: m.breakdown,
                     matched: m.matched,
                     missing: m.missing,
+                    unknown: m.unknown,
                     comment: m.comment,
                     flags: build_flags(vacancy, age, cv_chars),
                 })
@@ -201,6 +203,7 @@ impl OneFMatchService {
                 &candidate.name,
                 age,
                 cv_text,
+                candidate.cv_url.as_deref(),
                 candidate.profile_data.as_ref(),
             )
             .await?;
@@ -242,7 +245,7 @@ impl OneFMatchService {
         let rows = sqlx::query_as::<_, MatchRow>(
             r#"
             SELECT m.vacancy_id_1f, v.external_vacancy_id, v.name, v.company,
-                   m.score, m.rank, m.breakdown, m.matched, m.missing, m.comment,
+                   m.score, m.rank, m.breakdown, m.matched, m.missing, m.unknown, m.comment,
                    m.flags, m.computed_at
             FROM onef_candidate_matches m
             JOIN onef_vacancies v ON v.vacancy_id_1f = m.vacancy_id_1f
@@ -275,8 +278,6 @@ impl OneFMatchService {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Replace wholesale rather than upsert: the catalogue may have lost vacancies
-        // since the last run, and stale rankings must not linger.
         sqlx::query("DELETE FROM onef_candidate_matches WHERE candidate_id = $1")
             .bind(candidate_id)
             .execute(&mut *tx)
@@ -287,8 +288,8 @@ impl OneFMatchService {
                 r#"
                 INSERT INTO onef_candidate_matches (
                     candidate_id, vacancy_id_1f, score, rank, breakdown, matched, missing,
-                    comment, flags, model, prompt_version, catalogue_hash, source_hash
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                    unknown, comment, flags, model, prompt_version, catalogue_hash, source_hash
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 "#,
             )
             .bind(candidate_id)
@@ -298,6 +299,7 @@ impl OneFMatchService {
             .bind(serde_json::to_value(&s.breakdown)?)
             .bind(&s.matched)
             .bind(&s.missing)
+            .bind(&s.unknown)
             .bind(&s.comment)
             .bind(serde_json::to_value(&s.flags)?)
             .bind(MODEL)
@@ -333,6 +335,7 @@ struct MatchRow {
     breakdown: Option<JsonValue>,
     matched: Vec<String>,
     missing: Vec<String>,
+    unknown: Vec<String>,
     comment: Option<String>,
     flags: Option<JsonValue>,
     computed_at: DateTime<Utc>,
@@ -353,6 +356,7 @@ impl From<MatchRow> for ScoredVacancy {
                 .unwrap_or_default(),
             matched: r.matched,
             missing: r.missing,
+            unknown: r.unknown,
             comment: r.comment.unwrap_or_default(),
             flags: r
                 .flags

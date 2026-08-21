@@ -16,6 +16,25 @@ use tokio::fs;
 use tokio::process::Command;
 
 const GENERATION_BATCH_SIZE: usize = 25;
+
+const MIN_EXTRACTABLE_CV_CHARS: usize = 100;
+
+const CANDIDATE_PROFILE_PROMPT: &str = r#"You are an HR analyst extracting a structured profile from a candidate's CV.
+
+Rules:
+1. Extract ONLY what the source states. Never infer, embellish or invent experience.
+2. Leave a field null or empty when the CV does not cover it. An empty field is correct and useful; a guessed one is harmful.
+3. `education_level` must use one of exactly these values when determinable: "Высшее", "Неоконченное высшее", "Среднее специальное", "Среднее". Otherwise null.
+4. `total_experience_years` is a number — total professional experience in years. If the CV lists dated jobs, sum them. Null ONLY if there is nothing to compute from.
+5. `languages` entries use the form "Язык: уровень" (e.g. "Русский: свободный"), levels being родной/свободный/профессиональный/разговорный/базовый. Map any wording onto that scale.
+6. `specialties` must name the professional FIELD in the form "Категория: Подкатегория", matching how vacancies are classified (e.g. "Менеджмент и бизнес: Менеджмент", "Информационные технологии: Разработка ПО", "Гуманитарные и социальные: Психология"). Give 1-3. This is the field of work, NOT a list of technologies.
+7. `professional_skills` is what the person can DO (e.g. "проектирование REST API", "управление командой"). `computer_skills` is the tools and technologies they use (e.g. "Docker", "Bitrix24"). Keep them separate — never put tools in professional_skills.
+8. `summary` is 2-3 sentences in Russian describing who this candidate professionally is.
+
+Return JSON:
+{"summary": "", "education_level": null, "education_detail": null, "total_experience_years": null,
+ "current_role": null, "specialties": [], "languages": [], "computer_skills": [],
+ "professional_skills": [], "personal_qualities": []}"#;
 const MAX_PARALLEL_BATCHES: usize = 8;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -602,23 +621,81 @@ Return ONLY a JSON object with this exact shape:
         name: &str,
         age: Option<u32>,
         cv_text: &str,
+        cv_file_path: Option<&str>,
         profile_data: Option<&JsonValue>,
     ) -> Result<CandidateProfile> {
-        let system_prompt = r#"You are an HR analyst extracting a structured profile from a candidate's CV.
+        if cv_text.trim().chars().count() < MIN_EXTRACTABLE_CV_CHARS {
+            if let Some(path) = cv_file_path {
+                tracing::info!("CV text too sparse ({} chars); using Vision for {}", cv_text.trim().chars().count(), path);
+                match self.extract_candidate_profile_with_vision(name, age, path, profile_data).await {
+                    Ok(profile) => return Ok(profile),
+                    Err(e) => tracing::error!("Vision profile extraction failed, falling back to text: {:?}", e),
+                }
+            }
+        }
 
-Rules:
-1. Extract ONLY what the source states. Never infer, embellish or invent experience.
-2. Leave a field null or empty when the CV does not cover it. An empty field is correct and useful; a guessed one is harmful.
-3. `education_level` must use one of exactly these values when determinable: "Высшее", "Неоконченное высшее", "Среднее специальное", "Среднее". Otherwise null.
-4. `total_experience_years` is a number — the total professional experience in years. Null if it cannot be determined.
-5. `languages` entries use the form "Язык: уровень" (e.g. "Русский: свободный") when the level is stated, otherwise just the language.
-6. `summary` is 2-3 sentences in Russian describing who this candidate professionally is.
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": CANDIDATE_PROFILE_PROMPT},
+                {"role": "user", "content": self.profile_user_content(name, age, cv_text, profile_data)}
+            ],
+            "response_format": { "type": "json_object" }
+        });
 
-Return JSON:
-{"summary": "", "education_level": null, "education_detail": null, "total_experience_years": null,
- "current_role": null, "specialties": [], "languages": [], "computer_skills": [],
- "professional_skills": [], "personal_qualities": []}"#;
+        let resp = self.chat_json_retrying(payload, "candidate profile extraction").await?;
+        Ok(serde_json::from_value(resp).unwrap_or_default())
+    }
 
+    async fn extract_candidate_profile_with_vision(
+        &self,
+        name: &str,
+        age: Option<u32>,
+        cv_file_path: &str,
+        profile_data: Option<&JsonValue>,
+    ) -> Result<CandidateProfile> {
+        let images = self.extract_images_from_cv(cv_file_path).await?;
+        if images.is_empty() {
+            return Err(anyhow::anyhow!("No images could be extracted from CV").into());
+        }
+
+        let mut content: Vec<JsonValue> = vec![serde_json::json!({
+            "type": "text",
+            "text": format!(
+                "{}\n\nРезюме приложено изображениями ниже. Извлеки профиль строго из них.",
+                self.profile_user_content(name, age, "", profile_data)
+            )
+        })];
+
+        for (i, image_base64) in images.iter().take(3).enumerate() {
+            tracing::info!("Adding CV page {} to vision profile request", i + 1);
+            content.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": format!("data:image/png;base64,{}", image_base64), "detail": "high" }
+            }));
+        }
+
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": CANDIDATE_PROFILE_PROMPT},
+                {"role": "user", "content": content}
+            ],
+            "response_format": { "type": "json_object" },
+            "max_tokens": 1500
+        });
+
+        let resp = self.chat_json_retrying(payload, "vision profile extraction").await?;
+        Ok(serde_json::from_value(resp).unwrap_or_default())
+    }
+
+    fn profile_user_content(
+        &self,
+        name: &str,
+        age: Option<u32>,
+        cv_text: &str,
+        profile_data: Option<&JsonValue>,
+    ) -> String {
         let mut user_content = format!("Кандидат: {}\n", name);
         if let Some(age) = age {
             user_content.push_str(&format!("Возраст: {}\n", age));
@@ -626,19 +703,10 @@ Return JSON:
         if let Some(extra) = profile_data {
             user_content.push_str(&format!("Анкета: {}\n", extra));
         }
-        user_content.push_str(&format!("\nТекст резюме:\n{}", cv_text));
-
-        let payload = serde_json::json!({
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "response_format": { "type": "json_object" }
-        });
-
-        let resp = self.chat_json_retrying(payload, "candidate profile extraction").await?;
-        Ok(serde_json::from_value(resp).unwrap_or_default())
+        if !cv_text.trim().is_empty() {
+            user_content.push_str(&format!("\nТекст резюме:\n{}", cv_text));
+        }
+        user_content
     }
 
     pub async fn rank_vacancies(
@@ -655,19 +723,21 @@ Scoring rules:
 2. A fundamentally different profession is a fundamental mismatch (0-20), no matter how transferable the soft skills. An accountant is not a fit for a designer role.
 3. Missing a stated mandatory requirement (education level, licence, years of experience) costs heavily.
 4. Judge only on: specialty fit, professional skills, education, experience, languages, computer skills, personal qualities. The candidate's specialty fit and professional skills matter most; personal qualities matter least.
+4a. Compare specialty by MEANING, not wording. The candidate profile and the vacancy may phrase the same field differently ("Разработка ПО" vs "Информационные технологии: Разработка ПО"); treat those as a match. Only a genuinely different profession is a mismatch.
+4b. A null or empty candidate field means UNKNOWN, not zero. Never penalise a dimension you have no data on: score it 50, and list that dimension's name in `unknown`. Score 0 only when you have evidence the candidate genuinely lacks the requirement. Judge the candidate on what is known.
 5. NEVER consider age or gender. They are handled outside this scoring and must not influence any number or comment.
 6. Some vacancies contain placeholder or nonsense requirement text (random characters, a word repeated, "test test test"). Do NOT invent a match for those — score the affected dimension low and say plainly in the comment that the vacancy has no usable requirements.
 7. Judge only from the profile given. Never assume unstated experience.
 
 Score bands: 0-30 fundamental mismatch. 31-60 partial overlap, key requirements missing. 61-80 strong fit with gaps. 81-100 excellent fit.
 
-`matched` and `missing` list concrete requirements, not generalities. `comment` is 1-2 sentences, in Russian, blunt and specific.
+`matched` and `missing` list concrete requirements, not generalities. `unknown` lists dimension names scored 50 for lack of data (one of: education, experience, professional_skills, languages, computer_skills, specialty, personal_qualities). `comment` is 1-2 sentences, in Russian, blunt and specific; if anything is in `unknown`, say what was missing from the CV.
 
 Return JSON:
 {"matches": [{"vacancy_id_1f": 0, "score": 0,
   "breakdown": {"education": 0, "experience": 0, "professional_skills": 0, "languages": 0,
                 "computer_skills": 0, "specialty": 0, "personal_qualities": 0},
-  "matched": [], "missing": [], "comment": ""}]}"#;
+  "matched": [], "missing": [], "unknown": [], "comment": ""}]}"#;
 
         let user_content = format!(
             "ПРОФИЛЬ КАНДИДАТА:\n{}\n\nВАКАНСИИ ({} шт.):\n{}",
