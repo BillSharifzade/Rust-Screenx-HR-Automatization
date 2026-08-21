@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use crate::models::onef_vacancy::de_i64_flexible;
 
-pub const PROMPT_VERSION: &str = "match-v1";
+pub const PROMPT_VERSION: &str = "match-v2";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CandidateProfile {
@@ -77,6 +77,8 @@ pub struct VacancyMatch {
     pub matched: Vec<String>,
     #[serde(default)]
     pub missing: Vec<String>,
+    #[serde(default)]
+    pub unknown: Vec<String>,
     #[serde(default)]
     pub comment: String,
 }
@@ -193,6 +195,7 @@ pub fn sanitize_matches(raw: &JsonValue, allowed: &HashSet<i64>) -> Vec<VacancyM
         m.breakdown.clamp();
         m.matched.retain(|s| !s.trim().is_empty());
         m.missing.retain(|s| !s.trim().is_empty());
+        m.unknown.retain(|s| !s.trim().is_empty());
         out.push(m);
     }
 
@@ -266,6 +269,16 @@ mod tests {
         assert_eq!(out[0].breakdown.education, 0);
         assert_eq!(out[1].score, 0);
         assert_eq!(out[1].vacancy_id_1f, 2);
+    }
+
+    #[test]
+    fn keeps_unknown_dimensions_and_drops_blanks() {
+        let allowed: HashSet<i64> = [9].into_iter().collect();
+        let raw = json!({"matches": [
+            {"vacancy_id_1f": 9, "score": 50, "unknown": ["experience", "", "  "]}
+        ]});
+        let out = sanitize_matches(&raw, &allowed);
+        assert_eq!(out[0].unknown, vec!["experience".to_string()]);
     }
 
     #[test]
