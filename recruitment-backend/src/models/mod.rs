@@ -7,6 +7,8 @@ pub mod test_attempt;
 pub mod user;
 pub mod candidate;
 pub mod vacancy;
+pub mod onef_vacancy;
+pub mod onef_match;
 pub mod webhook_log;
 pub mod message;
 pub mod response;

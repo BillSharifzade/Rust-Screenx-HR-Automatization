@@ -24,6 +24,8 @@ services:
       - INTEGRATION_RPS=${INTEGRATION_RPS:-10}
       - ONEF_BASE_URLS=${ONEF_BASE_URLS:-}
       - ONEF_WEBHOOK_URL=${ONEF_WEBHOOK_URL:-}
+      - ONEF_READ_BASE_URL=${ONEF_READ_BASE_URL:-}
+      - ONEF_VACANCY_SYNC_INTERVAL_SECS=${ONEF_VACANCY_SYNC_INTERVAL_SECS:-600}
       - RUST_LOG=info,recruitment_backend=debug
     volumes:
       - ./uploads:/app/uploads
