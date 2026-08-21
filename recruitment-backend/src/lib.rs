@@ -13,6 +13,7 @@ use crate::services::{
     notification_service::NotificationService, test_service::TestService,
     vacancy_service::VacancyService, candidate_service::CandidateService,
     koinotinav_service::KoinotinavService, onef_service::OneFService,
+    onef_vacancy_service::OneFVacancyService, onef_match_service::OneFMatchService,
     message_service::MessageService,
     attempt_service::AttemptService,
     response_service::ResponseService,
@@ -34,6 +35,8 @@ pub struct AppState {
     pub candidate_service: CandidateService,
     pub koinotinav_service: KoinotinavService,
     pub onef_service: OneFService,
+    pub onef_vacancy_service: OneFVacancyService,
+    pub onef_match_service: OneFMatchService,
     pub message_service: MessageService,
     pub attempt_service: AttemptService,
     pub response_service: ResponseService,
@@ -61,6 +64,13 @@ impl AppState {
         let candidate_service = CandidateService::new(pool.clone());
         let koinotinav_service = KoinotinavService::new();
         let onef_service = OneFService::new(config.onef_base_urls.clone());
+        let onef_vacancy_service =
+            OneFVacancyService::new(pool.clone(), config.onef_read_base_url.clone());
+        let onef_match_service = OneFMatchService::new(
+            pool.clone(),
+            ai_service.clone(),
+            onef_vacancy_service.clone(),
+        );
         let message_service = MessageService::new(pool.clone());
         let attempt_service = AttemptService::new(pool.clone());
         let response_service = ResponseService::new(pool.clone());
@@ -77,6 +87,8 @@ impl AppState {
             candidate_service,
             koinotinav_service,
             onef_service,
+            onef_vacancy_service,
+            onef_match_service,
             message_service,
             attempt_service,
             response_service,

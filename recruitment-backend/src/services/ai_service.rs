@@ -1,5 +1,7 @@
 use crate::dto::integration_dto::{CreateQuestion, GenerateVacancyDescriptionPayload};
 use crate::error::Result;
+use crate::models::onef_match::CandidateProfile;
+use crate::models::onef_vacancy::OneFVacancy;
 use crate::models::question::{
     MultipleChoiceDetails, Question, QuestionDetails, QuestionType,
     ShortAnswerDetails,
@@ -594,6 +596,108 @@ Return ONLY a JSON object with this exact shape:
         Ok(images)
     }
 
+
+    pub async fn extract_candidate_profile(
+        &self,
+        name: &str,
+        age: Option<u32>,
+        cv_text: &str,
+        profile_data: Option<&JsonValue>,
+    ) -> Result<CandidateProfile> {
+        let system_prompt = r#"You are an HR analyst extracting a structured profile from a candidate's CV.
+
+Rules:
+1. Extract ONLY what the source states. Never infer, embellish or invent experience.
+2. Leave a field null or empty when the CV does not cover it. An empty field is correct and useful; a guessed one is harmful.
+3. `education_level` must use one of exactly these values when determinable: "Высшее", "Неоконченное высшее", "Среднее специальное", "Среднее". Otherwise null.
+4. `total_experience_years` is a number — the total professional experience in years. Null if it cannot be determined.
+5. `languages` entries use the form "Язык: уровень" (e.g. "Русский: свободный") when the level is stated, otherwise just the language.
+6. `summary` is 2-3 sentences in Russian describing who this candidate professionally is.
+
+Return JSON:
+{"summary": "", "education_level": null, "education_detail": null, "total_experience_years": null,
+ "current_role": null, "specialties": [], "languages": [], "computer_skills": [],
+ "professional_skills": [], "personal_qualities": []}"#;
+
+        let mut user_content = format!("Кандидат: {}\n", name);
+        if let Some(age) = age {
+            user_content.push_str(&format!("Возраст: {}\n", age));
+        }
+        if let Some(extra) = profile_data {
+            user_content.push_str(&format!("Анкета: {}\n", extra));
+        }
+        user_content.push_str(&format!("\nТекст резюме:\n{}", cv_text));
+
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "response_format": { "type": "json_object" }
+        });
+
+        let resp = self.chat_json_retrying(payload, "candidate profile extraction").await?;
+        Ok(serde_json::from_value(resp).unwrap_or_default())
+    }
+
+    pub async fn rank_vacancies(
+        &self,
+        profile: &CandidateProfile,
+        vacancies: &[OneFVacancy],
+    ) -> Result<JsonValue> {
+        let system_prompt = r#"You are a critical, unbiased senior HR specialist ranking vacancies for one candidate.
+
+You receive one candidate profile and a list of vacancies. Score EVERY vacancy in the list.
+
+Scoring rules:
+1. BE STRICT and comparative. These vacancies are ranked against each other — spread the scores. If everything lands in the 60-75 band you have failed the task.
+2. A fundamentally different profession is a fundamental mismatch (0-20), no matter how transferable the soft skills. An accountant is not a fit for a designer role.
+3. Missing a stated mandatory requirement (education level, licence, years of experience) costs heavily.
+4. Judge only on: specialty fit, professional skills, education, experience, languages, computer skills, personal qualities. The candidate's specialty fit and professional skills matter most; personal qualities matter least.
+5. NEVER consider age or gender. They are handled outside this scoring and must not influence any number or comment.
+6. Some vacancies contain placeholder or nonsense requirement text (random characters, a word repeated, "test test test"). Do NOT invent a match for those — score the affected dimension low and say plainly in the comment that the vacancy has no usable requirements.
+7. Judge only from the profile given. Never assume unstated experience.
+
+Score bands: 0-30 fundamental mismatch. 31-60 partial overlap, key requirements missing. 61-80 strong fit with gaps. 81-100 excellent fit.
+
+`matched` and `missing` list concrete requirements, not generalities. `comment` is 1-2 sentences, in Russian, blunt and specific.
+
+Return JSON:
+{"matches": [{"vacancy_id_1f": 0, "score": 0,
+  "breakdown": {"education": 0, "experience": 0, "professional_skills": 0, "languages": 0,
+                "computer_skills": 0, "specialty": 0, "personal_qualities": 0},
+  "matched": [], "missing": [], "comment": ""}]}"#;
+
+        let user_content = format!(
+            "ПРОФИЛЬ КАНДИДАТА:\n{}\n\nВАКАНСИИ ({} шт.):\n{}",
+            serde_json::to_string_pretty(profile).unwrap_or_default(),
+            vacancies.len(),
+            render_vacancies(vacancies)
+        );
+
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "response_format": { "type": "json_object" }
+        });
+
+        self.chat_json_retrying(payload, "vacancy ranking").await
+    }
+
+    async fn chat_json_retrying(&self, payload: JsonValue, label: &str) -> Result<JsonValue> {
+        match self.chat_openai(payload.clone()).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::warn!("{} failed ({:?}); retrying once", label, e);
+                self.chat_openai(payload).await
+            }
+        }
+    }
+
     async fn chat_openai(&self, payload: JsonValue) -> Result<JsonValue> {
         let res = self.client
             .post(format!("{}/chat/completions", self.api_base))
@@ -820,3 +924,47 @@ mod tests {
     }
 }
 
+fn render_vacancies(vacancies: &[OneFVacancy]) -> String {
+    const DESCRIPTION_BUDGET: usize = 600;
+    const CATALOGUE_BUDGET: usize = 120_000;
+
+    let render = |include_description: bool| -> String {
+        vacancies
+            .iter()
+            .map(|v| {
+                let mut block = format!(
+                    "---\nvacancy_id_1f: {}\nname: {}\ncompany: {}\nspecialty: {}\neducation: {}\nexperience: {}\nlanguages: {}\ncomputer_skills: {}\nprofessional_skills: {}\npersonal_qualities: {}",
+                    v.vacancy_id_1f,
+                    v.name,
+                    v.company.as_deref().unwrap_or("-"),
+                    v.specialty.as_deref().unwrap_or("-"),
+                    v.education.as_deref().unwrap_or("-"),
+                    v.experience.as_deref().unwrap_or("-"),
+                    if v.languages.is_empty() { "-".to_string() } else { v.languages.join("; ") },
+                    if v.computer_skills.is_empty() { "-".to_string() } else { v.computer_skills.join("; ") },
+                    v.professional_skills.as_deref().unwrap_or("-"),
+                    v.personal_qualities.as_deref().unwrap_or("-"),
+                );
+                if include_description {
+                    if let Some(d) = v.description_clean.as_deref() {
+                        let truncated: String = d.chars().take(DESCRIPTION_BUDGET).collect();
+                        block.push_str(&format!("\ndescription: {}", truncated));
+                    }
+                }
+                block
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let with_descriptions = render(true);
+    if with_descriptions.chars().count() <= CATALOGUE_BUDGET {
+        with_descriptions
+    } else {
+        tracing::info!(
+            "Catalogue of {} vacancies exceeds the prompt budget; ranking on structured fields only",
+            vacancies.len()
+        );
+        render(false)
+    }
+}

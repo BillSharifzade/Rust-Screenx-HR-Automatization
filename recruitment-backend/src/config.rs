@@ -18,6 +18,8 @@ pub struct Config {
     pub telegram_bot_token: String,
     pub webapp_url: String,
     pub onef_base_urls: Vec<String>,
+    pub onef_read_base_url: Option<String>,
+    pub onef_vacancy_sync_interval_secs: u64,
 }
 
 pub static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -25,6 +27,8 @@ pub static CONFIG: OnceLock<Config> = OnceLock::new();
 impl Config {
     pub fn from_env() -> Result<Self> {
         dotenv().ok();
+
+        let onef_base_urls = parse_onef_base_urls();
 
         Ok(Self {
             server_address: get_env("SERVER_ADDRESS")?,
@@ -43,7 +47,13 @@ impl Config {
             max_ai_questions: get_env_parse("MAX_AI_QUESTIONS")?,
             telegram_bot_token: get_env("TELEGRAM_BOT_TOKEN")?,
             webapp_url: get_env("WEBAPP_URL")?,
-            onef_base_urls: parse_onef_base_urls(),
+            onef_read_base_url: parse_onef_read_base_url(&onef_base_urls),
+            onef_vacancy_sync_interval_secs: env::var("ONEF_VACANCY_SYNC_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .filter(|secs| *secs >= 30)
+                .unwrap_or(600),
+            onef_base_urls,
         })
     }
 }
@@ -106,4 +116,14 @@ fn parse_onef_base_urls() -> Vec<String> {
     }
 
     Vec::new()
+}
+fn parse_onef_read_base_url(fallback: &[String]) -> Option<String> {
+    if let Ok(raw) = env::var("ONEF_READ_BASE_URL") {
+        let trimmed = raw.trim().trim_end_matches('/').to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    fallback.first().cloned()
 }

@@ -180,6 +180,22 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    {
+        let state = app_state.clone();
+        tokio::spawn(async move {
+            if !state.onef_vacancy_service.is_enabled() {
+                return;
+            }
+            let interval = Duration::from_secs(get_config().onef_vacancy_sync_interval_secs);
+            loop {
+                if let Err(e) = state.onef_vacancy_service.sync().await {
+                    tracing::error!("1F vacancy catalogue sync failed: {:?}", e);
+                }
+                tokio::time::sleep(interval).await;
+            }
+        });
+    }
+
     let base_routes = Router::new().route("/health", get(routes::health::health));
 
     let integration_api = Router::new()
@@ -500,6 +516,22 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/onef/dictionaries/test-statuses",
             get(routes::onef::list_test_statuses),
+        )
+        .route(
+            "/api/onef/matching/vacancies",
+            get(routes::onef_vacancies::list_onef_vacancies),
+        )
+        .route(
+            "/api/onef/matching/vacancies/:vacancy_id_1f",
+            get(routes::onef_vacancies::get_onef_vacancy),
+        )
+        .route(
+            "/api/onef/matching/sync",
+            post(routes::onef_vacancies::sync_onef_vacancies),
+        )
+        .route(
+            "/api/onef/matching/candidate",
+            post(routes::onef_vacancies::match_candidate),
         )
         .layer(axum::middleware::from_fn_with_state(
             recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),
