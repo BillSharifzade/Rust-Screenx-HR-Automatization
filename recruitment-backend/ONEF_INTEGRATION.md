@@ -1,7 +1,7 @@
 # 1F Integration Documentation
 
-**Version:** 1.2  
-**Last Updated:** 2026-02-11  
+**Version:** 1.3  
+**Last Updated:** 2026-08-21  
 **Target Audience:** 1F Developers / Integrators
 
 ---
@@ -256,6 +256,85 @@ Triggered when a grade is manually shared with OneF.
 *   **Response:** `[{ "id": "pending", "label": "Pending (Invite Sent)" }, ...]`
 
 ---
+
+### 3.7 AI Vacancy Matching
+
+Ranks the whole 1F vacancy catalogue for one candidate. Self-contained: it keeps its own
+synced copy of 1F's vacancies and does not touch the platform's `/vacancies` records or
+the application pipeline.
+
+**Where the data comes from.** The platform pulls vacancies from
+`GET http://192.168.1.47/app/v1.2/api/publications/action/getVacancies` on a timer
+(only that host serves it — the others return 404). Candidate data is read from the
+platform's own database; nothing about the candidate comes from 1F.
+
+#### Rank Vacancies For A Candidate
+*   **Endpoint:** `POST /matching/candidate`
+*   **Payload:** `{ "candidate_id": "uuid", "top_n": 5 }` — bare or wrapped in `requestBody`.
+*   **`candidate_id` is the platform UUID 1F already has**: the `candidate.id` from
+    `new_application`, and the `candidate_id` in every later webhook.
+*   Cold calls run two AI requests and take 5-15 seconds — **use a timeout of 60s or more**.
+    Repeat calls are cached and instant.
+
+```json
+{
+  "candidate_id": "a109320e-...",
+  "candidate_name": "Собиров Суннатулло",
+  "scoreable": true,
+  "cached": false,
+  "catalogue_size": 5,
+  "cv_chars": 0,
+  "profile": { "education_level": "Высшее", "total_experience_years": 7.0, "...": "..." },
+  "matches": [
+    {
+      "vacancy_id_1f": 29502,
+      "external_vacancy_id": "205",
+      "name": "Проектный менеджер",
+      "company": "BYD",
+      "score": 80,
+      "rank": 1,
+      "breakdown": { "education": 90, "experience": 85, "specialty": 80, "...": 0 },
+      "matched": ["Высшее образование", "Опыт 3–5 лет"],
+      "missing": ["Таджикский язык"],
+      "unknown": ["computer_skills"],
+      "comment": "Сильное соответствие по специальности и опыту.",
+      "flags": {
+        "age_requirement": "от 20 до 30 лет",
+        "age_mismatch": false,
+        "gender_requirement": "Мужской",
+        "data_quality": 60,
+        "low_data_quality": true,
+        "low_confidence": false
+      }
+    }
+  ]
+}
+```
+
+**Four things to handle on the 1F side:**
+
+1. **Check `scoreable` before reading scores.** When a CV yields no professional
+   information the platform returns `scoreable: false`, a Russian `reason`, and an empty
+   `matches` array — rather than inventing numbers from nothing.
+2. **Age and gender never affect the score.** They appear in `flags` only, for a human to
+   weigh. `age_mismatch` is computed from the candidate's date of birth; it is absent when
+   the vacancy states no age requirement or no date of birth is on file. Gender is echoed
+   from the vacancy and never compared, because the platform stores no candidate gender.
+3. **`unknown` lists dimensions scored 50 for lack of data**, so a neutral 50 can be told
+   apart from a genuinely mediocre 50.
+4. **`low_data_quality`** means that vacancy's requirement text was placeholder or junk
+   when synced. Treat its score with caution.
+
+`cv_chars: 0` does not mean the CV was empty — image CVs and unreadable PDFs are processed
+with Vision instead, and still produce a full profile.
+
+#### Catalogue Inspection
+*   `GET /matching/vacancies` — the synced catalogue plus `last_synced_at`. Add
+    `?include_inactive=true` to include vacancies 1F has withdrawn (kept, not deleted).
+*   `GET /matching/vacancies/{vacancy_id_1f}` — one vacancy, by 1F's internal id.
+*   `POST /matching/sync` — force a refresh instead of waiting for the timer. Use after
+    publishing or editing a vacancy in 1F. Returns counts of what changed. An empty
+    response from 1F is treated as a fault and leaves the catalogue untouched.
 
 ## 4. Status Reference Table
 
