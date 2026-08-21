@@ -31,6 +31,17 @@ pub struct CandidateProfile {
     pub personal_qualities: Vec<String>,
 }
 
+impl CandidateProfile {
+    pub fn has_usable_data(&self) -> bool {
+        self.education_level.is_some()
+            || self.total_experience_years.is_some()
+            || self.current_role.is_some()
+            || !self.specialties.is_empty()
+            || !self.professional_skills.is_empty()
+            || !self.computer_skills.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MatchBreakdown {
     #[serde(default)]
@@ -207,6 +218,20 @@ pub fn sanitize_matches(raw: &JsonValue, allowed: &HashSet<i64>) -> Vec<VacancyM
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn profile_without_professional_signal_is_unscoreable() {
+        let mut p = CandidateProfile::default();
+        assert!(!p.has_usable_data());
+
+        p.summary = "Ответственный кандидат.".into();
+        p.languages = vec!["Русский: свободный".into()];
+        p.personal_qualities = vec!["внимательный".into()];
+        assert!(!p.has_usable_data());
+
+        p.current_role = Some("Бухгалтер".into());
+        assert!(p.has_usable_data());
+    }
 
     #[test]
     fn parses_the_age_forms_1f_actually_sends() {

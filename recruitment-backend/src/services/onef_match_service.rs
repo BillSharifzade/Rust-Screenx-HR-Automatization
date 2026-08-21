@@ -41,6 +41,9 @@ pub struct CandidateMatchResult {
     pub candidate_id: Uuid,
     pub candidate_name: String,
     pub cached: bool,
+    pub scoreable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub computed_at: DateTime<Utc>,
     pub catalogue_size: usize,
     pub cv_chars: usize,
@@ -106,6 +109,8 @@ impl OneFMatchService {
                     candidate_id,
                     candidate_name: candidate.name,
                     cached: true,
+                    scoreable: true,
+                    reason: None,
                     computed_at: cached.1,
                     catalogue_size: catalogue.len(),
                     cv_chars,
@@ -118,6 +123,29 @@ impl OneFMatchService {
         let profile = self
             .profile_for(&candidate, &cv_text, age, &source_hash)
             .await?;
+
+        if !profile.has_usable_data() {
+            let reason = match candidate.cv_url.as_deref() {
+                None => "Кандидат не приложил резюме — оценка невозможна.".to_string(),
+                Some(path) => format!(
+                    "Из резюме ({}) не удалось извлечь данные для оценки.",
+                    path.rsplit('/').next().unwrap_or(path)
+                ),
+            };
+            tracing::warn!("Candidate {} is unscoreable: {}", candidate_id, reason);
+            return Ok(CandidateMatchResult {
+                candidate_id,
+                candidate_name: candidate.name,
+                cached: false,
+                scoreable: false,
+                reason: Some(reason),
+                computed_at: Utc::now(),
+                catalogue_size: catalogue.len(),
+                cv_chars,
+                profile,
+                matches: Vec::new(),
+            });
+        }
 
         let raw = self.ai.rank_vacancies(&profile, &catalogue).await?;
         let allowed: HashSet<i64> = catalogue.iter().map(|v| v.vacancy_id_1f).collect();
@@ -169,6 +197,8 @@ impl OneFMatchService {
             candidate_id,
             candidate_name: candidate.name,
             cached: false,
+            scoreable: true,
+            reason: None,
             computed_at,
             catalogue_size: catalogue.len(),
             cv_chars,
