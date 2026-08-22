@@ -336,6 +336,173 @@ with Vision instead, and still produce a full profile.
     publishing or editing a vacancy in 1F. Returns counts of what changed. An empty
     response from 1F is treated as a fault and leaves the catalogue untouched.
 
+## 3.7 Interview Form Recognition (Handwritten Sheets)
+
+HR fills in the interview evaluation sheets by hand and photographs them. 1F sends us the
+link; we straighten the page, transcribe it with a vision model, score how legible each
+field was, and store the result against the candidate.
+
+Two paper templates are in circulation, matching the `interview_1` / `interview_2`
+pipeline stages:
+
+| `form_type` | Printed title |
+| --- | --- |
+| `interview_1` | Форма оценки соискателя в ходе проведения 1-го личного собеседования |
+| `interview_2` | Форма оценки соискателя в ходе проведения 2-го личного собеседования |
+
+`GET /api/onef/interview-forms/schema` returns this contract at runtime — the canonical
+parameter keys, the critical fields, and the confidence thresholds — so 1F does not have
+to keep a copy of it in sync by hand.
+
+### Submit a form
+
+`POST /api/onef/interview-forms/recognize`
+
+Recognition takes tens of seconds, so this queues the work and answers `202` immediately.
+
+```json
+{
+  "image_url": "https://files.example/scan.jpg",
+  "image_urls": ["https://files.example/page1.jpg"],
+  "candidate_id": "0f1e...",
+  "vacancy_id": 1042,
+  "form_type": "interview_1",
+  "callback_url": "https://1f.example/hooks/interview-form",
+  "external_ref": "1F-DOC-8871"
+}
+```
+
+Only one of `image_url` / `image_urls` is required; everything else is optional.
+`image_urls` wins when both are given, and duplicate links are collapsed. At most 10
+images per request, 25 MB each, `http`/`https` only.
+
+`form_type` is a *hint*. The printed page title always wins, and a disagreement is
+recorded in `warnings` rather than being silently accepted.
+
+Response:
+
+```json
+{
+  "job_id": "02b0080f-...",
+  "status": "pending",
+  "images": 2,
+  "callback_status": "pending",
+  "poll_url": "/api/onef/interview-forms/jobs/02b0080f-..."
+}
+```
+
+### Collect the result
+
+Either poll `GET /api/onef/interview-forms/jobs/{job_id}` until `status` leaves
+`pending`/`processing`, or supply `callback_url` and we POST the same body to it.
+
+Job `status`: `pending` → `processing` → `completed` | `partial` | `failed`.
+`partial` means some pages were read and others were not; `error` lists what failed, per
+URL. Each page is processed independently, so one bad link does not lose the rest.
+
+The callback is retried up to 3 times with backoff; `callback_status` tracks
+`skipped` / `pending` / `delivered` / `failed`. `external_ref` is echoed back untouched.
+
+```json
+{
+  "id": "02b0080f-...",
+  "status": "completed",
+  "external_ref": "1F-DOC-8871",
+  "forms": [
+    {
+      "id": "7bc02f7c-...",
+      "form_type": "interview_1",
+      "source_url": "https://files.example/scan.jpg",
+      "fields": { "...": "see below" },
+      "field_confidence": { "candidate_name": 0.94, "interview_date": 0.55 },
+      "overall_confidence": 0.81,
+      "needs_review": true,
+      "low_confidence_fields": ["interview_date"],
+      "warnings": ["Glare across the comments block"]
+    }
+  ]
+}
+```
+
+### The `fields` object
+
+Header, for both templates: `interviewers` (array — the line often holds two names),
+`interview_date` (ISO `YYYY-MM-DD`), `candidate_name`, `candidate_age`,
+`position_discussed`, `scheduled_start_time`, `actual_arrival_time`, `interview_from`,
+`interview_to` (all times `HH:MM`). `interview_2` adds `interviewer_position`,
+`department` and `division`.
+
+`parameters` is an ordered array of `{key, label, value}`:
+
+* On **`interview_1`** the labels are pre-printed, so `key` carries a canonical slug —
+  `vacancy_source`, `company_knowledge`, `residence_birthplace`, `family`, `core_values`,
+  `goals`, `relatives_in_group`, `salary_expectation`, `self_work_deadline`,
+  `planned_start_date`, `ready_to_work_abroad`. Two revisions of this template are in
+  circulation and their rows differ, so only the rows actually printed on that sheet
+  come back.
+* On **`interview_2`** the labels are handwritten and differ per interviewer, so `key` is
+  `null` and `label` holds the transcribed text.
+
+`interview_1` also carries `strengths` and `growth_areas` — the two 3-row grids, each row
+`{index, prof_soft_skills, personal_qualities}` — plus `comments`,
+`hr_department_recommendation`, `test_results_bud` and `test_results_fed`. The older
+revision of this template prints a further «Выводы» box below the comments — `conclusions`,
+null on sheets that do not have it.
+
+`interview_2` instead carries `requester_decision` and `hr_decision`, each
+`{full_name, position, comment}`.
+
+`extra_notes` collects anything written outside every box — dates of birth, salary
+ladders like `"ЗП: 2мес. - 20000, 3/4 - 25000, с 5-го 30000"`, target departments. These
+are common on real sheets and have no home field.
+
+A blank box comes back as `null`. That is a correct answer, not a failure — plenty of
+these rows are legitimately left empty.
+
+### Confidence and review
+
+Handwriting is not read perfectly, so nothing is presented as certain. `field_confidence`
+scores each field on **legibility**, and `needs_review` is set when any of the following
+holds:
+
+* a filled-in critical field scores below `0.75`, or carries no score at all;
+* the sheet average is below `0.80`;
+* the printed title could not be matched to a known template;
+* the page had a quality problem (blur, glare, a washed-out photocopy, a cropped edge).
+
+Critical fields are the ones that drive downstream automation and are also the easiest to
+misread: `candidate_name`, `interview_date`, the four time fields,
+`parameters.salary_expectation` and `parameters.planned_start_date`.
+
+Treat `needs_review: true` as "a human must confirm this before it counts".
+
+* `GET /api/onef/interview-forms/review-queue?candidate_id=&limit=` — everything still
+  awaiting a human.
+* `GET /api/onef/interview-forms/results/{id}` — one recognised sheet.
+* `POST /api/onef/interview-forms/results/{id}/review` — record the human verdict:
+
+  ```json
+  { "corrected_fields": { "candidate_name": "Саидов Самиуллох" }, "reviewed_by": "uuid" }
+  ```
+
+  `corrected_fields` must be an object shaped like `fields`. It is stored *alongside*
+  the original — `fields` is never overwritten — so what the model read stays auditable
+  next to what HR judged correct. Consumers should prefer `corrected_fields` when it is
+  present.
+
+### Notes for the sending side
+
+* **Orientation is handled for you.** These sheets get laid sideways on a desk, so the
+  page is often rotated inside a correctly-tagged frame and EXIF cannot describe it — in
+  the reference set all ten phone photos are stored landscape with disagreeing
+  orientation tags. We detect the true rotation from the page content, so send the photo
+  as-is.
+* **Resolution.** Anything above 2048px on the long edge is downscaled, because that is
+  all the vision model uses. Below roughly 800px the handwriting stops being legible and
+  the result is flagged.
+* **The same sheet photographed twice** is normal and produces two entries. `image_sha256`
+  on each result identifies byte-identical normalised pages.
+
 ## 4. Status Reference Table
 
 ### Candidate Statuses

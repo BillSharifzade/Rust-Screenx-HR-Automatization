@@ -10,5 +10,6 @@ pub mod vacancy;
 pub mod onef_vacancy;
 pub mod onef_match;
 pub mod webhook_log;
+pub mod interview_form;
 pub mod message;
 pub mod response;

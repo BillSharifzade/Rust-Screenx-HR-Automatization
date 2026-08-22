@@ -15,6 +15,7 @@ use crate::services::{
     koinotinav_service::KoinotinavService, onef_service::OneFService,
     onef_vacancy_service::OneFVacancyService, onef_match_service::OneFMatchService,
     message_service::MessageService,
+    interview_form_service::InterviewFormService,
     attempt_service::AttemptService,
     response_service::ResponseService,
 };
@@ -38,6 +39,7 @@ pub struct AppState {
     pub onef_vacancy_service: OneFVacancyService,
     pub onef_match_service: OneFMatchService,
     pub message_service: MessageService,
+    pub interview_form_service: InterviewFormService,
     pub attempt_service: AttemptService,
     pub response_service: ResponseService,
 }
@@ -57,7 +59,7 @@ impl AppState {
             http_client.clone(),
         );
         let eval_service = EvalService::new(config.openai_api_key.clone(), http_client.clone());
-        let embed_service = EmbedService::new(config.openai_api_key.clone(), http_client);
+        let embed_service = EmbedService::new(config.openai_api_key.clone(), http_client.clone());
         let notification_service =
             NotificationService::new(pool.clone(), config.telegram_bot_webhook_url.clone());
         let vacancy_service = VacancyService::new(pool.clone());
@@ -72,6 +74,11 @@ impl AppState {
             onef_vacancy_service.clone(),
         );
         let message_service = MessageService::new(pool.clone());
+        let interview_form_service = InterviewFormService::new(
+            pool.clone(),
+            ai_service.clone(),
+            http_client,
+        );
         let attempt_service = AttemptService::new(pool.clone());
         let response_service = ResponseService::new(pool.clone());
 
@@ -90,6 +97,7 @@ impl AppState {
             onef_vacancy_service,
             onef_match_service,
             message_service,
+            interview_form_service,
             attempt_service,
             response_service,
         }

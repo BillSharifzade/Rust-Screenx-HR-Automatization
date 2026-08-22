@@ -533,6 +533,30 @@ async fn main() -> anyhow::Result<()> {
             "/api/onef/matching/candidate",
             post(routes::onef_vacancies::match_candidate),
         )
+        .route(
+            "/api/onef/interview-forms/recognize",
+            post(routes::interview_forms::recognize),
+        )
+        .route(
+            "/api/onef/interview-forms/jobs/:job_id",
+            get(routes::interview_forms::get_job),
+        )
+        .route(
+            "/api/onef/interview-forms/results/:id",
+            get(routes::interview_forms::get_result),
+        )
+        .route(
+            "/api/onef/interview-forms/results/:id/review",
+            post(routes::interview_forms::submit_review),
+        )
+        .route(
+            "/api/onef/interview-forms/review-queue",
+            get(routes::interview_forms::review_queue),
+        )
+        .route(
+            "/api/onef/interview-forms/schema",
+            get(routes::interview_forms::schema),
+        )
         .layer(axum::middleware::from_fn_with_state(
             recruitment_backend::middleware::rate_limit::new_rps_state(config.integration_rps),
             recruitment_backend::middleware::rate_limit::rps_middleware,
