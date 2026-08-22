@@ -344,16 +344,16 @@ mod tests {
         let pool = setup_test_db().await;
         let service = TestService::new(pool);
         let user_id = Uuid::new_v4();
-        sqlx::query!(
+        sqlx::query(
             r#"INSERT INTO users (id, external_id, name, email, role, is_active)
                VALUES ($1, $2, $3, $4, $5, $6)"#,
-            user_id,
-            format!("ext-{}", user_id),
-            "Test User",
-            format!("test_{}@example.com", user_id),
-            "hr",
-            true
         )
+        .bind(user_id)
+        .bind(format!("ext-{}", user_id))
+        .bind("Test User")
+        .bind(format!("test_{}@example.com", user_id))
+        .bind("hr")
+        .bind(true)
         .execute(&service.pool)
         .await
         .expect("failed to insert test user");

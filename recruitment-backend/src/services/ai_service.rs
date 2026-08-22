@@ -1,5 +1,6 @@
 use crate::dto::integration_dto::{CreateQuestion, GenerateVacancyDescriptionPayload};
 use crate::error::Result;
+use crate::models::interview_form::RecognizedForm;
 use crate::models::onef_match::CandidateProfile;
 use crate::models::onef_vacancy::OneFVacancy;
 use crate::models::question::{
@@ -35,6 +36,102 @@ Return JSON:
 {"summary": "", "education_level": null, "education_detail": null, "total_experience_years": null,
  "current_role": null, "specialties": [], "languages": [], "computer_skills": [],
  "professional_skills": [], "personal_qualities": []}"#;
+const PAGE_ROTATION_PROMPT: &str = r#"You are shown one photograph of a printed A4 form lying on a desk.
+
+Decide how far the PAGE must be turned CLOCKWISE for its printed text to read normally, left to right, with the heading at the top.
+
+  0   — already upright
+  90  — the page is on its side and its top edge currently points LEFT
+  180 — the page is upside down
+  270 — the page is on its side and its top edge currently points RIGHT
+
+Judge this from the printed text and the page layout, not from the shape of the photo. You do not need to read the words — the direction the lines of type run is enough.
+
+Answer with only: {"rotation": 0}"#;
+
+const INTERVIEW_FORM_PROMPT: &str = r#"You transcribe handwritten HR interview evaluation sheets used by ГК «КОИНОТИ НАВ» into structured JSON.
+
+This is TRANSCRIPTION, not interpretation. Copy what is written. Do not summarise, expand abbreviations, translate, or tidy grammar.
+
+## Which template is it
+
+Read the printed title line at the top of the page.
+
+- "Форма оценки соискателя в ходе проведения 1-го личного собеседования" -> form_type "interview_1"
+- "Форма оценки соискателя в ходе проведения 2-го личного собеседования" -> form_type "interview_2"
+- Title unreadable or a different document -> form_type "unknown", and say so in `warnings`.
+
+## interview_1
+
+Header: Интервьюер (one or two people — split on the comma into separate array entries), Дата интервью, Ф.И.О. соискателя, Обсуждаемая должность, Установленное время начала интервью, Фактическое время прихода соискателя, Продолжительность собеседования: с ___ до ___.
+
+The «Параметры / Информация» table has PRE-PRINTED row labels. Emit one `parameters` entry per printed row, in page order, `key` set to the canonical slug below, `label` copied as printed:
+
+  Откуда узнали о вакансии                              -> vacancy_source
+  Знания о нашей Компании                               -> company_knowledge
+  Место жительства  /  Место жительства/Место рождения  -> residence_birthplace
+  Состав семьи                                          -> family
+  Основные ценности                                     -> core_values
+  Цели личные/профессиональные                          -> goals
+  Родные/знакомые, работающие в ГК «КОИНОТИ НАВ»        -> relatives_in_group
+  ЗП (минимальный/ожидаемый)                            -> salary_expectation
+  Дедлайн выполнения Самостоятельной Работы             -> self_work_deadline
+  Планируемая дата выхода                               -> planned_start_date
+  Готовность работать за границей                       -> ready_to_work_abroad
+
+Two templates are in circulation and rows differ between them. Emit only the rows actually printed on THIS sheet. A printed row left blank by hand gets `value: null` — that is a correct answer, not a failure.
+
+Then two 3-row grids, each with columns "Prof & Soft skills" and "Личные Качества":
+`strengths` from «1-3 сильных качества соискателя», `growth_areas` from «1-3 точки роста соискателя». Keep the printed row number in `index`. Skip rows where both cells are empty.
+
+Footer: `comments` from «Комментарии и общие впечатления о соискателе» (transcribe in full, keep the writer's own numbered list and line breaks), `hr_department_recommendation` from «Рекомендации ДЧР», `test_results_bud` from «Итоги тестов БЮД», `test_results_fed` from «Итоги тестов ФЭД».
+
+The older revision of this template also prints a «Выводы:» box under the comments -> `conclusions`. It is a separate box: never fold it into `comments`, and leave it null on sheets that do not print it.
+
+## interview_2
+
+Header additionally has Должность (of the interviewer), Департамент and Отдел -> `interviewer_position`, `department`, `division`.
+
+Its «Параметры / Информация» row labels are HANDWRITTEN and differ on every sheet (e.g. «Причина переезда», «Критерии выбора Ко.», «Интересы», «СТОП-ФАКТОРЫ», «Знание Англ-го», «Опыт работы», «Лог-е мышление»). For this template set `key` to null and copy the handwritten label into `label`.
+
+Two decision blocks, each with Ф.И.О., Должность and a comment box:
+«Комментарии и решение со стороны Инициатора заявки» -> `requester_decision`
+«Комментарии и решение со стороны Специалиста HR Департамента» -> `hr_decision`
+
+`strengths` and `growth_areas` do not exist on this template — leave them empty.
+
+## Reading rules
+
+1. NEVER invent. If a box is blank, the value is null. If ink is present but you genuinely cannot read it, transcribe your best attempt and lower that field's confidence — do not substitute a plausible-looking word.
+2. Handwriting routinely OVERFLOWS its cell: it runs into the row below, past the right edge, over printed rules, and into the margins. Attribute overflowing text to the row where the line STARTS. Text written outside every box — dates of birth, salary ladders like "ЗП: 2мес. - 20000, 3/4 - 25000, с 5-го 30000", target departments — goes into `extra_notes`, one entry per note.
+3. The script is Russian cursive with Latin fragments (Python, MS Office, KPI, P&L, Scrum, Agile, Somon.tj, FinTech, HR) and Tajik proper nouns (Душанбе, Худжанд, Спартак, Айни, "101 мкр"). Keep Latin in Latin and Cyrillic in Cyrillic — never transliterate between them.
+4. Keep in-house abbreviations exactly as written: Ко., ГК, ДЧР, БЮД, ФЭД, ИС / МС (испытательный срок), ЗП, рук-во, упр., МСФО. Do not expand them.
+5. `interview_date` -> ISO "YYYY-MM-DD". The year is printed as "202" with only the LAST DIGIT handwritten, so "202" + "6" means 2026. If the date is incomplete, return null and add a warning.
+6. All times -> "HH:MM", 24-hour. «Продолжительность собеседования: с X до Y» gives `interview_from` and `interview_to`; the "до" half is often left blank -> null.
+7. `candidate_age` only if a number of years is actually written on the sheet (some have e.g. "47 лет" in the margin). Otherwise null.
+8. Salaries, times and dates carry the highest risk of misreading. Re-check every digit and be conservative with their confidence scores.
+9. Transcribe struck-through text only if the replacement is unclear; otherwise take the correction and note it in `warnings`.
+
+## Confidence
+
+`field_confidence` maps a field path to 0.0-1.0 reflecting how legible that value was, NOT how plausible it looks. Use dotted paths: "candidate_name", "interview_date", "parameters.salary_expectation" (canonical key when there is one, otherwise "parameters.3" by zero-based position), "strengths.0.prof_soft_skills", "comments", "hr_decision.comment". Score every field you filled in. A clearly printed or crisply written value is 0.95+; a confident cursive read is 0.8-0.9; a plausible-but-ambiguous read is 0.4-0.7; a guess is below 0.4.
+
+Put page-level problems in `warnings`: blur, glare, shadow, a photocopy with washed-out contrast, a cropped edge, a page photographed at an angle, or a title you could not read.
+
+Return ONLY this JSON object:
+
+{"form_type":"interview_1","interviewers":[],"interviewer_position":null,"department":null,"division":null,
+ "interview_date":null,"candidate_name":null,"candidate_age":null,"position_discussed":null,
+ "scheduled_start_time":null,"actual_arrival_time":null,"interview_from":null,"interview_to":null,
+ "parameters":[{"key":null,"label":"","value":null}],
+ "strengths":[{"index":1,"prof_soft_skills":null,"personal_qualities":null}],
+ "growth_areas":[{"index":1,"prof_soft_skills":null,"personal_qualities":null}],
+ "comments":null,"conclusions":null,"hr_department_recommendation":null,"test_results_bud":null,"test_results_fed":null,
+ "extra_notes":[],
+ "requester_decision":{"full_name":null,"position":null,"comment":null},
+ "hr_decision":{"full_name":null,"position":null,"comment":null},
+ "field_confidence":{},"warnings":[]}"#;
+
 const MAX_PARALLEL_BATCHES: usize = 8;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -902,7 +999,173 @@ Return JSON:
             payload.title, payload.company, payload.professional_skills.clone().unwrap_or_default()
         )
     }
+
+
+    pub async fn detect_page_rotation(&self, probe_base64: &str) -> Result<u32> {
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": PAGE_ROTATION_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", probe_base64),
+                        "detail": "low"
+                    }}
+                ]}
+            ],
+            "response_format": { "type": "json_object" },
+            "temperature": 0,
+            "max_tokens": 50
+        });
+
+        let raw = self.chat_json_retrying(payload, "page rotation probe").await?;
+
+        let rotation = raw
+            .get("rotation")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()))
+            .unwrap_or(0);
+
+        Ok(match rotation {
+            90 | 180 | 270 => rotation as u32,
+            _ => 0,
+        })
+    }
+
+    pub async fn recognize_interview_form(
+        &self,
+        image_base64: &str,
+        form_type_hint: Option<&str>,
+    ) -> Result<(RecognizedForm, JsonValue)> {
+        let mut instruction = String::from(
+            "Транскрибируй прикреплённый бланк оценки соискателя. Верни JSON строго по схеме.",
+        );
+        if let Some(hint) = form_type_hint {
+            instruction.push_str(&format!(
+                "\n\nОтправитель ожидает шаблон \"{}\". Проверь это по печатному заголовку страницы: \
+                 если заголовок говорит другое, доверяй заголовку и добавь предупреждение в warnings.",
+                hint
+            ));
+        }
+
+        let payload = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": INTERVIEW_FORM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", image_base64),
+                        "detail": "high"
+                    }}
+                ]}
+            ],
+            "response_format": { "type": "json_object" },
+            // Transcription, not composition — we want the same answer twice.
+            "temperature": 0,
+            "max_tokens": 4000
+        });
+
+        let raw = self
+            .chat_json_retrying(payload, "interview form recognition")
+            .await?;
+
+        let form: RecognizedForm = serde_json::from_value(sanitize_interview_form_json(raw.clone()))
+            .map_err(|e| {
+                anyhow::anyhow!("Interview form JSON did not match the expected shape: {}", e)
+            })?;
+
+        Ok((form, raw))
+    }
 }
+
+/// Nudge a model response back into the shape `RecognizedForm` expects.
+///
+/// `response_format: json_object` guarantees valid JSON, not our schema: the
+/// model happily emits `null` where an array belongs, quotes a number, or
+/// returns a bare string for a decision block. Rather than scatter custom
+/// deserialisers across the model, coerce once here.
+fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
+    let Some(obj) = raw.as_object_mut() else {
+        return serde_json::json!({});
+    };
+
+    for key in [
+        "interviewers",
+        "parameters",
+        "strengths",
+        "growth_areas",
+        "extra_notes",
+        "warnings",
+    ] {
+        match obj.get(key) {
+            Some(JsonValue::Array(_)) => {}
+            _ => {
+                obj.insert(key.to_string(), JsonValue::Array(Vec::new()));
+            }
+        }
+    }
+
+    // `interviewers` is one text line that may hold two names; the model
+    // sometimes returns the raw line instead of splitting it.
+    if let Some(JsonValue::Array(items)) = obj.get_mut("interviewers") {
+        let split: Vec<JsonValue> = items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .flat_map(|s| s.split(',').map(str::trim).map(str::to_string))
+            .filter(|s| !s.is_empty())
+            .map(JsonValue::String)
+            .collect();
+        *items = split;
+    }
+
+    for key in ["requester_decision", "hr_decision"] {
+        if !matches!(obj.get(key), Some(JsonValue::Object(_))) {
+            obj.insert(key.to_string(), JsonValue::Null);
+        }
+    }
+
+    if let Some(age) = obj.get("candidate_age") {
+        let parsed = match age {
+            JsonValue::Number(n) => n.as_i64(),
+            JsonValue::String(s) => s
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<i64>()
+                .ok(),
+            _ => None,
+        };
+        obj.insert(
+            "candidate_age".to_string(),
+            // A three-digit age is a misread, not a very old candidate.
+            match parsed.filter(|v| (14..=99).contains(v)) {
+                Some(v) => JsonValue::from(v),
+                None => JsonValue::Null,
+            },
+        );
+    }
+
+    let confidence = obj
+        .get("field_confidence")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(k, v)| {
+                    let score = match v {
+                        JsonValue::Number(n) => n.as_f64(),
+                        JsonValue::String(s) => s.trim().parse::<f64>().ok(),
+                        _ => None,
+                    }?;
+                    Some((k.clone(), JsonValue::from(score.clamp(0.0, 1.0))))
+                })
+                .collect::<serde_json::Map<_, _>>()
+        })
+        .unwrap_or_default();
+    obj.insert("field_confidence".to_string(), JsonValue::Object(confidence));
+
+    raw
+}
+
 
 #[cfg(test)]
 mod tests {
