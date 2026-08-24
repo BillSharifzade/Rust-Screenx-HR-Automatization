@@ -9,6 +9,7 @@ use crate::models::question::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rand::seq::SliceRandom;
+use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -17,6 +18,45 @@ use tokio::fs;
 use tokio::process::Command;
 
 const GENERATION_BATCH_SIZE: usize = 25;
+
+const CHAT_MAX_ATTEMPTS: u32 = 5;
+
+const CHAT_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+struct ChatFailure {
+    error: crate::error::Error,
+    retryable: bool,
+    retry_after: Option<Duration>,
+}
+
+fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|s| *s >= 0.0)
+        .map(Duration::from_secs_f32)
+}
+
+fn retry_after_from_body(body: &str) -> Option<Duration> {
+    let tail = body.split("try again in ").nth(1)?;
+    let digits: String = tail
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let value: f32 = digits.parse().ok()?;
+    let unit = tail[digits.len()..].trim_start();
+    if unit.starts_with("ms") {
+        Some(Duration::from_secs_f32(value / 1000.0))
+    } else if unit.starts_with('s') {
+        Some(Duration::from_secs_f32(value))
+    } else {
+        None
+    }
+}
 
 const MIN_EXTRACTABLE_CV_CHARS: usize = 100;
 
@@ -866,29 +906,87 @@ Return JSON:
     }
 
     async fn chat_openai(&self, payload: JsonValue) -> Result<JsonValue> {
-        let res = self.client
+        let mut attempt = 1u32;
+        loop {
+            match self.chat_openai_once(payload.clone()).await {
+                Ok(value) => return Ok(value),
+                Err(failure) => {
+                    if !failure.retryable || attempt >= CHAT_MAX_ATTEMPTS {
+                        return Err(failure.error);
+                    }
+                    let wait = failure.retry_after.unwrap_or_else(|| {
+                        Duration::from_millis(500 * 2u64.pow(attempt - 1))
+                    });
+                    let jitter = {
+                        let mut rng = rand::thread_rng();
+                        Duration::from_millis(rng.gen_range(0..750))
+                    };
+                    let wait = wait.min(CHAT_MAX_BACKOFF) + jitter;
+                    tracing::warn!(
+                        "OpenAI call failed on attempt {}/{} ({}); retrying in {:.2}s",
+                        attempt,
+                        CHAT_MAX_ATTEMPTS,
+                        failure.error,
+                        wait.as_secs_f32()
+                    );
+                    tokio::time::sleep(wait).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    async fn chat_openai_once(
+        &self,
+        payload: JsonValue,
+    ) -> std::result::Result<JsonValue, ChatFailure> {
+        let res = self
+            .client
             .post(format!("{}/chat/completions", self.api_base))
             .bearer_auth(&self.api_key)
             .json(&payload)
             .timeout(Duration::from_secs(120))
             .send()
-            .await?;
+            .await
+            .map_err(|e| ChatFailure {
+                retryable: e.is_timeout() || e.is_connect() || e.is_request(),
+                retry_after: None,
+                error: e.into(),
+            })?;
 
         if !res.status().is_success() {
             let status = res.status();
+            let retry_after = retry_after_from_headers(res.headers());
             let text = res.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("OpenAI API Error {}: {}", status, text).into());
+            return Err(ChatFailure {
+                retryable: status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || status.is_server_error(),
+                retry_after: retry_after.or_else(|| retry_after_from_body(&text)),
+                error: anyhow::anyhow!("OpenAI API Error {}: {}", status, text).into(),
+            });
         }
 
-        let body: JsonValue = res.json().await?;
-        
+        let body: JsonValue = res.json().await.map_err(|e| ChatFailure {
+            retryable: false,
+            retry_after: None,
+            error: e.into(),
+        })?;
+
+        Self::extract_json_content(body)
+    }
+
+    fn extract_json_content(body: JsonValue) -> std::result::Result<JsonValue, ChatFailure> {
         body.get("choices")
             .and_then(|c| c.get(0))
             .and_then(|c| c.get("message"))
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_str())
             .and_then(|s| serde_json::from_str(s).ok())
-            .ok_or_else(|| anyhow::anyhow!("Invalid OpenAI response format").into())
+            .ok_or_else(|| ChatFailure {
+                retryable: false,
+                retry_after: None,
+                error: anyhow::anyhow!("Invalid OpenAI response format").into(),
+            })
     }
 
     pub fn sanitize_questions(&self, raw: &JsonValue, num_questions: usize) -> Vec<Question> {
@@ -1160,6 +1258,45 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_wait_openai_asks_for_in_a_429_body() {
+        let body = r#"{"error":{"message":"Rate limit reached for gpt-4o in organization org-x on tokens per min (TPM): Limit 30000, Used 30000, Requested 2845. Please try again in 5.69s. Visit https://platform.openai.com/account/rate-limits to learn more.","type":"tokens","code":"rate_limit_exceeded"}}"#;
+        assert_eq!(
+            retry_after_from_body(body),
+            Some(Duration::from_secs_f32(5.69))
+        );
+    }
+
+    #[test]
+    fn reads_millisecond_waits() {
+        assert_eq!(
+            retry_after_from_body("Please try again in 320ms."),
+            Some(Duration::from_secs_f32(0.320))
+        );
+    }
+
+    #[test]
+    fn no_wait_when_the_body_does_not_carry_one() {
+        assert_eq!(retry_after_from_body("Incorrect API key provided"), None);
+        assert_eq!(retry_after_from_body("try again in soon"), None);
+    }
+
+    #[test]
+    fn reads_retry_after_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "4".parse().unwrap());
+        assert_eq!(
+            retry_after_from_headers(&headers),
+            Some(Duration::from_secs(4))
+        );
+
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            "Wed, 21 Oct 2015 07:28:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(retry_after_from_headers(&headers), None);
+    }
 
     #[test]
     fn deserializes_full_advice_from_model_json() {

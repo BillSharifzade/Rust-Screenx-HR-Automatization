@@ -277,6 +277,12 @@ def main() -> int:
     ap.add_argument("--form-type", default=None, choices=[None, "interview_1", "interview_2"])
     ap.add_argument("--keep-sidecar", action="store_true")
     ap.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="don't re-send images that already have a result in --out",
+    )
+    ap.add_argument("--only", nargs="+", metavar="FILE", help="only these filenames")
+    ap.add_argument(
         "--url-prefix",
         default=None,
         help="serve the images yourself and skip the nginx sidecar, e.g. https://host/assets/",
@@ -292,6 +298,33 @@ def main() -> int:
     if not images:
         print(f"no images in {assets_dir}", file=sys.stderr)
         return 1
+
+    if args.only:
+        wanted = set(args.only)
+        unknown = wanted - set(images)
+        if unknown:
+            print(f"not in {assets_dir}: {', '.join(sorted(unknown))}", file=sys.stderr)
+            return 1
+        images = [f for f in images if f in wanted]
+
+    # Results already on disk, so a re-run after a rate limit only pays for the
+    # pages that are actually missing.
+    done: list[tuple[str, dict]] = []
+    if args.skip_existing:
+        keep = []
+        for name in images:
+            path = os.path.join(args.out, os.path.splitext(name)[0] + ".json")
+            if os.path.exists(path):
+                with open(path) as fh:
+                    done.append((name, json.load(fh)))
+            else:
+                keep.append(name)
+        if done:
+            print(f"skipping {len(done)} image(s) already in {args.out}")
+        images = keep
+        if not images:
+            print("nothing left to recognize")
+            return 0
 
     if not wait_for_backend(args.base_url, args.container, args.wait):
         return 1
@@ -319,7 +352,7 @@ def main() -> int:
 
     os.makedirs(args.out, exist_ok=True)
     started = time.time()
-    recognitions: list[tuple[str, dict]] = []
+    recognitions: list[tuple[str, dict]] = list(done)
     jobs: list[dict] = []
 
     try:
@@ -391,7 +424,7 @@ def main() -> int:
     lines = [
         "# assets/ OCR test run",
         "",
-        f"- images: {len(images)}",
+        f"- images: {len(images) + len(done)}",
         f"- recognized: {len(recognitions)}",
         f"- jobs: " + ", ".join(f"{j['id']} ({j['status']})" for j in jobs),
         f"- wall clock: {elapsed}s",
