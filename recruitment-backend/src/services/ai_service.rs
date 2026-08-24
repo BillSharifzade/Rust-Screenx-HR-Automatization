@@ -1060,7 +1060,6 @@ Return JSON:
                 ]}
             ],
             "response_format": { "type": "json_object" },
-            // Transcription, not composition — we want the same answer twice.
             "temperature": 0,
             "max_tokens": 4000
         });
@@ -1078,12 +1077,6 @@ Return JSON:
     }
 }
 
-/// Nudge a model response back into the shape `RecognizedForm` expects.
-///
-/// `response_format: json_object` guarantees valid JSON, not our schema: the
-/// model happily emits `null` where an array belongs, quotes a number, or
-/// returns a bare string for a decision block. Rather than scatter custom
-/// deserialisers across the model, coerce once here.
 fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
     let Some(obj) = raw.as_object_mut() else {
         return serde_json::json!({});
@@ -1105,8 +1098,6 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
         }
     }
 
-    // `interviewers` is one text line that may hold two names; the model
-    // sometimes returns the raw line instead of splitting it.
     if let Some(JsonValue::Array(items)) = obj.get_mut("interviewers") {
         let split: Vec<JsonValue> = items
             .iter()
@@ -1137,7 +1128,6 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
         };
         obj.insert(
             "candidate_age".to_string(),
-            // A three-digit age is a misread, not a very old candidate.
             match parsed.filter(|v| (14..=99).contains(v)) {
                 Some(v) => JsonValue::from(v),
                 None => JsonValue::Null,
