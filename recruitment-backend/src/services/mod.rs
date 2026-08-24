@@ -8,6 +8,7 @@ pub mod export_service;
 pub mod external_vacancy_service;
 pub mod grading_service;
 pub mod notification_service;
+pub mod interview_form_pdf;
 pub mod pdf_service;
 pub mod queue_service;
 pub mod test_service;

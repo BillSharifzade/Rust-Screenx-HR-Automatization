@@ -63,6 +63,15 @@ def request(
     return 0, {"error": "unreachable"}
 
 
+def fetch_bytes(url: str, timeout: int = 120) -> bytes | None:
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout) as res:
+            return res.read()
+    except (urllib.error.HTTPError, OSError) as e:
+        print(f"  {url} -> {type(e).__name__}: {e}", file=sys.stderr)
+        return None
+
+
 def wait_for_backend(base_url: str, container: str, seconds: int) -> bool:
     deadline = time.time() + seconds
     announced = False
@@ -283,6 +292,11 @@ def main() -> int:
     )
     ap.add_argument("--only", nargs="+", metavar="FILE", help="only these filenames")
     ap.add_argument(
+        "--pdf",
+        action="store_true",
+        help="also download each form as a PDF laid out like the paper sheet",
+    )
+    ap.add_argument(
         "--url-prefix",
         default=None,
         help="serve the images yourself and skip the nginx sidecar, e.g. https://host/assets/",
@@ -324,7 +338,8 @@ def main() -> int:
         images = keep
         if not images:
             print("nothing left to recognize")
-            return 0
+            if not args.pdf:
+                return 0
 
     if not wait_for_backend(args.base_url, args.container, args.wait):
         return 1
@@ -337,18 +352,21 @@ def main() -> int:
         )
         return 1
 
+    # Only needed to hand the backend fetchable URLs; a PDF-only run has nothing to serve.
     sidecar_started = False
-    if args.url_prefix:
-        prefix = args.url_prefix if args.url_prefix.endswith("/") else args.url_prefix + "/"
-    else:
-        if not shutil.which("docker"):
-            print("docker not on PATH; pass --url-prefix instead", file=sys.stderr)
-            return 1
-        network = backend_network(args.container)
-        print(f"serving {assets_dir} on docker network {network} as {SIDECAR}")
-        start_sidecar(assets_dir, network)
-        sidecar_started = True
-        prefix = f"http://{SIDECAR}/"
+    prefix = ""
+    if images:
+        if args.url_prefix:
+            prefix = args.url_prefix if args.url_prefix.endswith("/") else args.url_prefix + "/"
+        else:
+            if not shutil.which("docker"):
+                print("docker not on PATH; pass --url-prefix instead", file=sys.stderr)
+                return 1
+            network = backend_network(args.container)
+            print(f"serving {assets_dir} on docker network {network} as {SIDECAR}")
+            start_sidecar(assets_dir, network)
+            sidecar_started = True
+            prefix = f"http://{SIDECAR}/"
 
     os.makedirs(args.out, exist_ok=True)
     started = time.time()
@@ -419,6 +437,16 @@ def main() -> int:
     finally:
         if sidecar_started and not args.keep_sidecar:
             docker("rm", "-f", SIDECAR, check=False)
+
+    if args.pdf and recognitions:
+        print(f"downloading {len(recognitions)} PDF(s)")
+        for name, rec in recognitions:
+            blob = fetch_bytes(
+                f"{args.base_url}/api/onef/interview-forms/results/{rec['id']}/pdf"
+            )
+            if blob:
+                with open(os.path.join(args.out, os.path.splitext(name)[0] + ".pdf"), "wb") as fh:
+                    fh.write(blob)
 
     elapsed = int(time.time() - started)
     lines = [

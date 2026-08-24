@@ -186,17 +186,24 @@ impl PdfService {
         Self::render(doc)
     }
 
-    fn new_document(title: &str, labels: &Labels) -> Result<genpdf::Document> {
-        let regular = fonts::FontData::new(FONT_REGULAR.to_vec(), None)
-            .map_err(|e| Error::Internal(format!("font load failed: {}", e)))?;
-        let bold = fonts::FontData::new(FONT_BOLD.to_vec(), None)
-            .map_err(|e| Error::Internal(format!("font load failed: {}", e)))?;
-        let italic = fonts::FontData::new(FONT_REGULAR.to_vec(), None)
-            .map_err(|e| Error::Internal(format!("font load failed: {}", e)))?;
-        let bold_italic = fonts::FontData::new(FONT_BOLD.to_vec(), None)
-            .map_err(|e| Error::Internal(format!("font load failed: {}", e)))?;
+    /// Liberation Sans, embedded — it carries Cyrillic, which the built-in PDF
+    /// base fonts do not. Shared with the interview-form renderer.
+    pub(crate) fn font_family() -> Result<fonts::FontFamily<fonts::FontData>> {
+        let load = |bytes: &[u8]| {
+            fonts::FontData::new(bytes.to_vec(), None)
+                .map_err(|e| Error::Internal(format!("font load failed: {}", e)))
+        };
 
-        let family = fonts::FontFamily { regular, bold, italic, bold_italic };
+        Ok(fonts::FontFamily {
+            regular: load(FONT_REGULAR)?,
+            bold: load(FONT_BOLD)?,
+            italic: load(FONT_REGULAR)?,
+            bold_italic: load(FONT_BOLD)?,
+        })
+    }
+
+    fn new_document(title: &str, labels: &Labels) -> Result<genpdf::Document> {
+        let family = Self::font_family()?;
 
         let mut doc = genpdf::Document::new(family);
         doc.set_title(transliterate(title));
@@ -652,7 +659,7 @@ fn themes_of(test: &Test) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn transliterate(input: &str) -> String {
+pub(crate) fn transliterate(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for c in input.chars() {
         if c.is_ascii() {

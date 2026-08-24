@@ -546,6 +546,10 @@ async fn main() -> anyhow::Result<()> {
             get(routes::interview_forms::get_result),
         )
         .route(
+            "/api/onef/interview-forms/results/:id/pdf",
+            get(routes::interview_forms::get_result_pdf),
+        )
+        .route(
             "/api/onef/interview-forms/results/:id/review",
             post(routes::interview_forms::submit_review),
         )

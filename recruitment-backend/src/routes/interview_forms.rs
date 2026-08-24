@@ -6,7 +6,7 @@ use crate::{
 };
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -48,6 +48,40 @@ pub async fn get_result(
 ) -> Result<impl IntoResponse> {
     let form = state.interview_form_service.get_recognition(id).await?;
     Ok(Json(form))
+}
+
+/// The transcription as a PDF laid out like the paper sheet it came from.
+pub async fn get_result_pdf(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse> {
+    let form = state.interview_form_service.get_recognition(id).await?;
+    let buffer = crate::services::interview_form_pdf::InterviewFormPdf::render(&form)?;
+
+    let stem = form
+        .source_url
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.').map(|(stem, _)| stem).or(Some(name)))
+        .map(|stem| {
+            stem.chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| form.id.to_string());
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}.pdf\"", stem),
+            ),
+        ],
+        buffer,
+    ))
 }
 
 pub async fn review_queue(
