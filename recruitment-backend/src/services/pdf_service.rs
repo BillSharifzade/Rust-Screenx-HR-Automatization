@@ -186,8 +186,6 @@ impl PdfService {
         Self::render(doc)
     }
 
-    /// Liberation Sans, embedded — it carries Cyrillic, which the built-in PDF
-    /// base fonts do not. Shared with the interview-form renderer.
     pub(crate) fn font_family() -> Result<fonts::FontFamily<fonts::FontData>> {
         let load = |bytes: &[u8]| {
             fonts::FontData::new(bytes.to_vec(), None)

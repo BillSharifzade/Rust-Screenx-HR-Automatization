@@ -50,7 +50,6 @@ pub async fn get_result(
     Ok(Json(form))
 }
 
-/// The transcription as a PDF laid out like the paper sheet it came from.
 pub async fn get_result_pdf(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

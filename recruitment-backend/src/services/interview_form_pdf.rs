@@ -1,7 +1,3 @@
-//! Renders a recognized interview sheet back out as a PDF laid out like the
-//! paper original — same title, same sections, same tables — with the
-//! handwriting replaced by typed text.
-
 use crate::error::{Error, Result};
 use crate::models::interview_form::*;
 use crate::services::pdf_service::{transliterate, PdfService};
@@ -37,13 +33,10 @@ fn cell_padding() -> Margins {
     Margins::trbl(1.5, 2.0, 1.5, 2.0)
 }
 
-/// Multi-line values keep their line breaks — a numbered comment block on the
-/// sheet should still read as a numbered block here.
 fn text_block(value: &str, style: Style) -> elements::LinearLayout {
     let mut layout = elements::LinearLayout::vertical();
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        // An empty cell still has to occupy its row.
         layout.push(elements::Paragraph::new(" ").styled(style));
         return layout;
     }
@@ -101,7 +94,6 @@ fn free_text(doc: &mut genpdf::Document, title: &str, body: &Option<String>) {
 pub struct InterviewFormPdf;
 
 impl InterviewFormPdf {
-    /// Uses the reviewed correction when there is one, otherwise what the model read.
     pub fn render(recognition: &InterviewFormRecognition) -> Result<Vec<u8>> {
         let source = recognition
             .corrected_fields
@@ -322,7 +314,6 @@ impl InterviewFormPdf {
         Ok(())
     }
 
-    /// Provenance, so a printed copy can never be mistaken for the signed original.
     fn push_footer(doc: &mut genpdf::Document, recognition: &InterviewFormRecognition) {
         doc.push(elements::Break::new(0.8));
 
