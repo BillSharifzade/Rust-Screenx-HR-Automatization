@@ -1166,12 +1166,90 @@ Return JSON:
             .chat_json_retrying(payload, "interview form recognition")
             .await?;
 
-        let form: RecognizedForm = serde_json::from_value(sanitize_interview_form_json(raw.clone()))
-            .map_err(|e| {
-                anyhow::anyhow!("Interview form JSON did not match the expected shape: {}", e)
-            })?;
+        let form: RecognizedForm =
+            serde_path_to_error::deserialize(sanitize_interview_form_json(raw.clone())).map_err(
+                |e| {
+                    anyhow::anyhow!(
+                        "Interview form JSON did not match the expected shape at `{}`: {}",
+                        e.path(),
+                        e.inner()
+                    )
+                },
+            )?;
 
         Ok((form, raw))
+    }
+}
+
+fn coerce_to_string(value: &JsonValue) -> Option<String> {
+    match value {
+        JsonValue::Null => None,
+        JsonValue::String(s) => {
+            let trimmed = s.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        JsonValue::Bool(b) => Some(b.to_string()),
+        JsonValue::Number(n) => Some(n.to_string()),
+        JsonValue::Array(items) => {
+            let parts: Vec<String> = items.iter().filter_map(coerce_to_string).collect();
+            (!parts.is_empty()).then(|| parts.join("\n"))
+        }
+        JsonValue::Object(map) => {
+            let parts: Vec<String> = map
+                .iter()
+                .filter_map(|(k, v)| coerce_to_string(v).map(|s| format!("{}: {}", k, s)))
+                .collect();
+            (!parts.is_empty()).then(|| parts.join("\n"))
+        }
+    }
+}
+
+fn stringify_optional(obj: &mut serde_json::Map<String, JsonValue>, key: &str) {
+    if let Some(value) = obj.get(key) {
+        if value.is_string() {
+            return;
+        }
+        let replacement = coerce_to_string(value).map_or(JsonValue::Null, JsonValue::String);
+        obj.insert(key.to_string(), replacement);
+    }
+}
+
+fn stringify_required(obj: &mut serde_json::Map<String, JsonValue>, key: &str, fallback: &str) {
+    let current = obj.get(key);
+    if matches!(current, Some(JsonValue::String(_))) {
+        return;
+    }
+    let replacement = current
+        .and_then(coerce_to_string)
+        .unwrap_or_else(|| fallback.to_string());
+    obj.insert(key.to_string(), JsonValue::String(replacement));
+}
+
+fn intify(obj: &mut serde_json::Map<String, JsonValue>, key: &str) {
+    if let Some(value) = obj.get(key) {
+        if value.is_i64() {
+            return;
+        }
+        let parsed = value
+            .as_str()
+            .and_then(|s| s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<i64>().ok())
+            .or_else(|| value.as_f64().map(|f| f as i64));
+        obj.insert(key.to_string(), parsed.map_or(JsonValue::from(0), JsonValue::from));
+    }
+}
+
+fn sanitize_rows(obj: &mut serde_json::Map<String, JsonValue>, key: &str, fields: &[&str]) {
+    let Some(JsonValue::Array(rows)) = obj.get_mut(key) else {
+        return;
+    };
+    rows.retain(|row| row.is_object());
+    for row in rows.iter_mut() {
+        if let Some(map) = row.as_object_mut() {
+            intify(map, "index");
+            for field in fields {
+                stringify_optional(map, field);
+            }
+        }
     }
 }
 
@@ -1196,6 +1274,55 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
         }
     }
 
+    for key in ["interviewers", "extra_notes", "warnings"] {
+        if let Some(JsonValue::Array(items)) = obj.get_mut(key) {
+            let coerced: Vec<JsonValue> = items
+                .iter()
+                .filter_map(coerce_to_string)
+                .map(JsonValue::String)
+                .collect();
+            *items = coerced;
+        }
+    }
+
+    stringify_required(
+        obj,
+        "form_type",
+        crate::models::interview_form::FORM_TYPE_UNKNOWN,
+    );
+
+    for key in [
+        "interviewer_position",
+        "department",
+        "division",
+        "interview_date",
+        "candidate_name",
+        "position_discussed",
+        "scheduled_start_time",
+        "actual_arrival_time",
+        "interview_from",
+        "interview_to",
+        "comments",
+        "conclusions",
+        "hr_department_recommendation",
+        "test_results_bud",
+        "test_results_fed",
+    ] {
+        stringify_optional(obj, key);
+    }
+
+    sanitize_rows(obj, "parameters", &["key", "value"]);
+    if let Some(JsonValue::Array(rows)) = obj.get_mut("parameters") {
+        for row in rows.iter_mut() {
+            if let Some(map) = row.as_object_mut() {
+                stringify_required(map, "label", "");
+            }
+        }
+    }
+    for key in ["strengths", "growth_areas"] {
+        sanitize_rows(obj, key, &["prof_soft_skills", "personal_qualities"]);
+    }
+
     if let Some(JsonValue::Array(items)) = obj.get_mut("interviewers") {
         let split: Vec<JsonValue> = items
             .iter()
@@ -1210,6 +1337,10 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
     for key in ["requester_decision", "hr_decision"] {
         if !matches!(obj.get(key), Some(JsonValue::Object(_))) {
             obj.insert(key.to_string(), JsonValue::Null);
+        } else if let Some(block) = obj.get_mut(key).and_then(|v| v.as_object_mut()) {
+            for field in ["full_name", "position", "comment"] {
+                stringify_optional(block, field);
+            }
         }
     }
 
@@ -1258,6 +1389,62 @@ fn sanitize_interview_form_json(mut raw: JsonValue) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_form(raw: JsonValue) -> RecognizedForm {
+        serde_path_to_error::deserialize(sanitize_interview_form_json(raw))
+            .unwrap_or_else(|e| panic!("failed at `{}`: {}", e.path(), e.inner()))
+    }
+
+    #[test]
+    fn a_text_box_answered_with_an_object_does_not_lose_the_page() {
+        let form = parse_form(serde_json::json!({
+            "form_type": "interview_1",
+            "candidate_name": "Иванов И.",
+            "comments": {"1": "Опыт 5 лет", "2": "Готов выйти сразу"},
+            "conclusions": ["Рекомендую", "Вторая линия"],
+        }));
+
+        assert_eq!(form.comments.as_deref(), Some("1: Опыт 5 лет\n2: Готов выйти сразу"));
+        assert_eq!(form.conclusions.as_deref(), Some("Рекомендую\nВторая линия"));
+    }
+
+    #[test]
+    fn coerces_rows_and_decision_blocks() {
+        let form = parse_form(serde_json::json!({
+            "form_type": "interview_2",
+            "parameters": [
+                {"key": null, "label": "Опыт работы", "value": {"лет": 5}},
+                {"key": "salary_expectation", "label": null, "value": 4500},
+                "not a row",
+            ],
+            "strengths": [{"index": "2", "prof_soft_skills": ["Python", "SQL"], "personal_qualities": null}],
+            "hr_decision": {"full_name": "Петрова", "position": null, "comment": ["ок", "берём"]},
+        }));
+
+        assert_eq!(form.parameters.len(), 2);
+        assert_eq!(form.parameters[0].value.as_deref(), Some("лет: 5"));
+        assert_eq!(form.parameters[1].label, "");
+        assert_eq!(form.parameters[1].value.as_deref(), Some("4500"));
+        assert_eq!(form.strengths[0].index, 2);
+        assert_eq!(form.strengths[0].prof_soft_skills.as_deref(), Some("Python\nSQL"));
+        let hr = form.hr_decision.expect("hr_decision");
+        assert_eq!(hr.comment.as_deref(), Some("ок\nберём"));
+        assert_eq!(hr.position, None);
+    }
+
+    #[test]
+    fn a_null_form_type_becomes_unknown_rather_than_a_parse_error() {
+        let form = parse_form(serde_json::json!({"form_type": null}));
+        assert_eq!(form.form_type, crate::models::interview_form::FORM_TYPE_UNKNOWN);
+    }
+
+    #[test]
+    fn shape_errors_name_the_offending_field() {
+        let raw = serde_json::json!({"form_type": "interview_1", "candidate_age": 33, "parameters": [{"label": "x", "value": "y"}], "field_confidence": {"candidate_name": "high"}});
+        let form = parse_form(raw);
+        assert!(form.field_confidence.is_empty());
+        assert_eq!(form.candidate_age, Some(33));
+    }
 
     #[test]
     fn reads_the_wait_openai_asks_for_in_a_429_body() {

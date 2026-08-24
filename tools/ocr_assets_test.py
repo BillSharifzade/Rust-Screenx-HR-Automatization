@@ -309,18 +309,18 @@ def main() -> int:
 
     # Results already on disk, so a re-run after a rate limit only pays for the
     # pages that are actually missing.
-    done: list[tuple[str, dict]] = []
+    preloaded: list[tuple[str, dict]] = []
     if args.skip_existing:
         keep = []
         for name in images:
             path = os.path.join(args.out, os.path.splitext(name)[0] + ".json")
             if os.path.exists(path):
                 with open(path) as fh:
-                    done.append((name, json.load(fh)))
+                    preloaded.append((name, json.load(fh)))
             else:
                 keep.append(name)
-        if done:
-            print(f"skipping {len(done)} image(s) already in {args.out}")
+        if preloaded:
+            print(f"skipping {len(preloaded)} image(s) already in {args.out}")
         images = keep
         if not images:
             print("nothing left to recognize")
@@ -352,7 +352,7 @@ def main() -> int:
 
     os.makedirs(args.out, exist_ok=True)
     started = time.time()
-    recognitions: list[tuple[str, dict]] = list(done)
+    recognitions: list[tuple[str, dict]] = list(preloaded)
     jobs: list[dict] = []
 
     try:
@@ -390,10 +390,10 @@ def main() -> int:
                     time.sleep(5)
                     continue
                 state = body.get("status")
-                done = len(body.get("forms") or [])
-                if (state, done) != last:
-                    print(f"  job {job_id}: {state} — {done}/{len(batch)} pages")
-                    last = (state, done)
+                pages = len(body.get("forms") or [])
+                if (state, pages) != last:
+                    print(f"  job {job_id}: {state} — {pages}/{len(batch)} pages")
+                    last = (state, pages)
                 if state in ("completed", "partial", "failed"):
                     jobs.append(body)
                     break
@@ -424,7 +424,7 @@ def main() -> int:
     lines = [
         "# assets/ OCR test run",
         "",
-        f"- images: {len(images) + len(done)}",
+        f"- images: {len(images) + len(preloaded)}",
         f"- recognized: {len(recognitions)}",
         f"- jobs: " + ", ".join(f"{j['id']} ({j['status']})" for j in jobs),
         f"- wall clock: {elapsed}s",
@@ -452,7 +452,7 @@ def main() -> int:
     print(summary)
     print()
     print(f"wrote {args.out}/")
-    return 0 if len(recognitions) == len(images) else 2
+    return 0 if len(recognitions) == len(images) + len(preloaded) else 2
 
 
 if __name__ == "__main__":
