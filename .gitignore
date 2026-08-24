@@ -49,3 +49,7 @@ Thumbs.db
 # --- Miscellaneous ---
 **/Cargo.toml.bak
 **/migrations_backup/
+
+# Python bytecode
+__pycache__/
+*.pyc

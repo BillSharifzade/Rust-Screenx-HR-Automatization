@@ -31,21 +31,61 @@ SIDECAR_IMAGE = "nginx:alpine"
 # --------------------------------------------------------------------------- http
 
 
-def request(method: str, url: str, payload: dict | None = None, timeout: int = 120):
+def request(
+    method: str,
+    url: str,
+    payload: dict | None = None,
+    timeout: int = 120,
+    retries: int = 3,
+):
+    """Returns (status, body). status 0 means the connection itself failed."""
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    if data:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as res:
-            body = res.read().decode("utf-8", "replace")
-            return res.status, (json.loads(body) if body.strip() else None)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=data, method=method)
+        if data:
+            req.add_header("Content-Type", "application/json")
         try:
-            return e.code, json.loads(body)
-        except json.JSONDecodeError:
-            return e.code, {"error": body[:500]}
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                body = res.read().decode("utf-8", "replace")
+                return res.status, (json.loads(body) if body.strip() else None)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            try:
+                return e.code, json.loads(body)
+            except json.JSONDecodeError:
+                return e.code, {"error": body[:500]}
+        except OSError as e:
+            # Includes URLError and the ConnectionResetError docker-proxy throws
+            # while the container is up but the app is not yet listening.
+            if attempt >= retries:
+                return 0, {"error": f"{type(e).__name__}: {e}"}
+            time.sleep(2)
+    return 0, {"error": "unreachable"}
+
+
+def wait_for_backend(base_url: str, container: str, seconds: int) -> bool:
+    deadline = time.time() + seconds
+    announced = False
+    while True:
+        status, body = request("GET", f"{base_url}/health", timeout=10, retries=0)
+        if status == 200:
+            if announced:
+                print()
+            return True
+        if time.time() > deadline:
+            print()
+            print(f"backend never answered on {base_url}/health ({status}: {body})", file=sys.stderr)
+            if shutil.which("docker"):
+                logs = docker("logs", "--tail", "20", container, check=False)
+                if logs:
+                    print(f"--- last lines of `docker logs {container}` ---", file=sys.stderr)
+                    print(logs, file=sys.stderr)
+            return False
+        if not announced:
+            print(f"waiting for {base_url}/health", end="", flush=True)
+            announced = True
+        print(".", end="", flush=True)
+        time.sleep(2)
 
 
 # ------------------------------------------------------------------------- docker
@@ -231,6 +271,9 @@ def main() -> int:
     ap.add_argument("--container", default="recruitment-backend")
     ap.add_argument("--batch", type=int, default=10, help="API cap is 10 per job")
     ap.add_argument("--timeout", type=int, default=2400, help="seconds to wait per job")
+    ap.add_argument(
+        "--wait", type=int, default=120, help="seconds to wait for the backend to start listening"
+    )
     ap.add_argument("--form-type", default=None, choices=[None, "interview_1", "interview_2"])
     ap.add_argument("--keep-sidecar", action="store_true")
     ap.add_argument(
@@ -250,9 +293,7 @@ def main() -> int:
         print(f"no images in {assets_dir}", file=sys.stderr)
         return 1
 
-    status, health = request("GET", f"{args.base_url}/health")
-    if status != 200:
-        print(f"backend not healthy at {args.base_url} ({status}: {health})", file=sys.stderr)
+    if not wait_for_backend(args.base_url, args.container, args.wait):
         return 1
     status, schema = request("GET", f"{args.base_url}/api/onef/interview-forms/schema")
     if status != 200:
@@ -309,8 +350,12 @@ def main() -> int:
                     "GET", f"{args.base_url}/api/onef/interview-forms/jobs/{job_id}"
                 )
                 if status != 200:
-                    print(f"poll failed ({status}): {body}", file=sys.stderr)
-                    return 1
+                    # Don't throw away a job that is still running over one bad poll.
+                    print(f"  poll failed ({status}): {body} — retrying", file=sys.stderr)
+                    if time.time() > deadline:
+                        return 1
+                    time.sleep(5)
+                    continue
                 state = body.get("status")
                 done = len(body.get("forms") or [])
                 if (state, done) != last:
