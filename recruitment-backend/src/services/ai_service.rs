@@ -87,7 +87,7 @@ Decide how far the PAGE must be turned CLOCKWISE for its printed text to read no
 
 Judge this from the printed text and the page layout, not from the shape of the photo. You do not need to read the words — the direction the lines of type run is enough.
 
-Answer with only: {"rotation": 0}"#;
+Answer with only this JSON object: {"rotation": 0}"#;
 
 const INTERVIEW_FORM_PROMPT: &str = r#"You transcribe handwritten HR interview evaluation sheets used by ГК «КОИНОТИ НАВ» into structured JSON.
 
@@ -1444,6 +1444,26 @@ mod tests {
         let form = parse_form(raw);
         assert!(form.field_confidence.is_empty());
         assert_eq!(form.candidate_age, Some(33));
+    }
+
+    /// `response_format: json_object` is rejected with a 400 unless the word
+    /// "json" appears somewhere in the messages. PAGE_ROTATION_PROMPT was missing
+    /// it, so every rotation probe failed and every page fell back to a guessed
+    /// orientation — and a guessed orientation warns, which flagged all 18 test
+    /// sheets for human review.
+    #[test]
+    fn every_json_mode_prompt_says_json() {
+        for (name, prompt) in [
+            ("PAGE_ROTATION_PROMPT", PAGE_ROTATION_PROMPT),
+            ("INTERVIEW_FORM_PROMPT", INTERVIEW_FORM_PROMPT),
+            ("CANDIDATE_PROFILE_PROMPT", CANDIDATE_PROFILE_PROMPT),
+        ] {
+            assert!(
+                prompt.to_lowercase().contains("json"),
+                "{} is sent with response_format json_object but never says \"json\"",
+                name
+            );
+        }
     }
 
     #[test]
