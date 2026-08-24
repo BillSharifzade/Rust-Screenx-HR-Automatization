@@ -95,15 +95,6 @@ pub struct ParameterRow {
     #[serde(default)]
     pub value: Option<String>,
 }
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ParameterRow {
-    #[serde(default)]
-    pub key: Option<String>,
-    #[serde(default)]
-    pub label: String,
-    #[serde(default)]
-    pub value: Option<String>,
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DecisionBlock {
