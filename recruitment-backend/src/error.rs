@@ -38,6 +38,14 @@ pub enum Error {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    /// An upstream service answered with something unusable.
+    #[error("Bad gateway: {0}")]
+    BadGateway(String),
+
+    /// A dependency is down or out of capacity (e.g. AI provider quota).
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -59,10 +67,12 @@ impl IntoResponse for Error {
             Error::Json(err) => (StatusCode::BAD_REQUEST, err.to_string()),
             Error::Reqwest(err) => (StatusCode::BAD_GATEWAY, format!("External service error: {}", err)),
             Error::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            Error::BadGateway(msg) => (StatusCode::BAD_GATEWAY, msg),
+            Error::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             Error::Io(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
             Error::Multipart(err) => (StatusCode::BAD_REQUEST, err.to_string()),
             Error::Xlsx(err) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Export error: {}", err)),
-            Error::Anyhow(err) => (StatusCode::BAD_REQUEST, err.to_string()),
+            Error::Anyhow(err) => anyhow_status(err),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An unexpected error occurred".to_string(),
@@ -72,6 +82,26 @@ impl IntoResponse for Error {
         let body = Json(json!({ "error": error_message }));
         (status, body).into_response()
     }
+}
+
+/// Services built on `anyhow` still wrap typed errors; map those to the status
+/// they would get unwrapped instead of reporting every failure as a bad request.
+fn anyhow_status(err: anyhow::Error) -> (StatusCode, String) {
+    if let Some(e) = err.downcast_ref::<Error>() {
+        return match e {
+            Error::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            Error::BadGateway(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
+            Error::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg.clone()),
+            _ => (StatusCode::BAD_REQUEST, err.to_string()),
+        };
+    }
+    if let Some(sqlx::Error::RowNotFound) = err.downcast_ref::<sqlx::Error>() {
+        return (StatusCode::NOT_FOUND, "Resource not found".to_string());
+    }
+    if err.downcast_ref::<reqwest::Error>().is_some() {
+        return (StatusCode::BAD_GATEWAY, format!("External service error: {}", err));
+    }
+    (StatusCode::BAD_REQUEST, err.to_string())
 }
 
 impl From<sqlx::Error> for Error {
