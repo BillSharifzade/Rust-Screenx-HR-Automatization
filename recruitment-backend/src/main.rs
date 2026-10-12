@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     let app_state = AppState::new(pool);
+    app_state.koinotinav_service.spawn_background_refresh();
 
     {
         tokio::spawn(async move {
