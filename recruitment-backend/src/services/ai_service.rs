@@ -58,6 +58,25 @@ fn retry_after_from_body(body: &str) -> Option<Duration> {
     }
 }
 
+/// OpenAI reports an empty balance as a 429, but unlike a rate limit it will
+/// not clear by waiting, so it must not be retried.
+fn is_quota_exhausted(body: &str) -> bool {
+    let error = serde_json::from_str::<JsonValue>(body)
+        .ok()
+        .and_then(|v| v.get("error").cloned());
+    let field = |name: &str| {
+        error
+            .as_ref()
+            .and_then(|e| e.get(name))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    ["insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"]
+        .iter()
+        .any(|marker| field("code") == *marker || field("type") == *marker)
+}
+
 const MIN_EXTRACTABLE_CV_CHARS: usize = 100;
 
 const CANDIDATE_PROFILE_PROMPT: &str = r#"You are an HR analyst extracting a structured profile from a candidate's CV.
@@ -898,6 +917,7 @@ Return JSON:
     async fn chat_json_retrying(&self, payload: JsonValue, label: &str) -> Result<JsonValue> {
         match self.chat_openai(payload.clone()).await {
             Ok(v) => Ok(v),
+            Err(e @ crate::error::Error::ServiceUnavailable(_)) => Err(e),
             Err(e) => {
                 tracing::warn!("{} failed ({:?}); retrying once", label, e);
                 self.chat_openai(payload).await
@@ -958,6 +978,18 @@ Return JSON:
             let status = res.status();
             let retry_after = retry_after_from_headers(res.headers());
             let text = res.text().await.unwrap_or_default();
+            if is_quota_exhausted(&text) {
+                tracing::error!("OpenAI quota exhausted: {}", text);
+                return Err(ChatFailure {
+                    retryable: false,
+                    retry_after: None,
+                    error: crate::error::Error::ServiceUnavailable(
+                        "AI provider quota exhausted: the OpenAI account has no credits left. \
+                         Top up billing at platform.openai.com to restore AI features."
+                            .into(),
+                    ),
+                });
+            }
             return Err(ChatFailure {
                 retryable: status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     || status.is_server_error(),
@@ -1503,6 +1535,19 @@ mod tests {
             "Wed, 21 Oct 2015 07:28:00 GMT".parse().unwrap(),
         );
         assert_eq!(retry_after_from_headers(&headers), None);
+    }
+
+    #[test]
+    fn an_empty_balance_is_not_mistaken_for_a_rate_limit() {
+        let exhausted = r#"{"error": {"message": "You have no credits remaining.",
+            "type": "insufficient_quota", "param": null, "code": "credit_balance_exhausted"}}"#;
+        assert!(is_quota_exhausted(exhausted));
+        assert!(is_quota_exhausted(r#"{"error": {"type": "requests", "code": "insufficient_quota"}}"#));
+
+        let rate_limited = r#"{"error": {"message": "Rate limit reached. Please try again in 20ms.",
+            "type": "requests", "code": "rate_limit_exceeded"}}"#;
+        assert!(!is_quota_exhausted(rate_limited));
+        assert!(!is_quota_exhausted("upstream connect error"));
     }
 
     #[test]
