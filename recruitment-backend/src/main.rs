@@ -621,7 +621,12 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = config.server_address.parse()?;
     info!("Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    // Peer addresses feed the per-client rate limiter.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
