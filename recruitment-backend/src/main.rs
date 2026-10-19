@@ -581,7 +581,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/auth/change-password",
             post(routes::auth::change_my_password),
         )
-        .layer(axum::middleware::from_fn(
+        .route_layer(axum::middleware::from_fn(
             recruitment_backend::middleware::auth::require_bearer_auth,
         ));
 
@@ -598,7 +598,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/auth/users/:id/password",
             post(routes::auth::reset_password),
         )
-        .layer(axum::middleware::from_fn(
+        .route_layer(axum::middleware::from_fn(
             recruitment_backend::middleware::auth::require_admin,
         ));
 
@@ -621,7 +621,6 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = config.server_address.parse()?;
     info!("Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await?;
-    // Peer addresses feed the per-client rate limiter.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
