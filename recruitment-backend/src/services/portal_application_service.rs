@@ -88,6 +88,11 @@ impl PortalApplicationService {
     }
 
     /// Sends graded, not yet delivered applications to 1F, oldest first.
+    ///
+    /// 1F rejects an application whose vacancy it does not know ("Задача 0 не
+    /// существует"), so one waits until 1F's catalogue (`onef_vacancies`, synced
+    /// every few minutes) links its vacancy, then goes out on the next pass.
+    /// Without a fresh catalogue everything is tried as is.
     pub async fn forward_to_onef(&self) -> Result<ForwardReport> {
         let mut report = ForwardReport::default();
         if !self.onef.is_enabled() {
@@ -108,6 +113,10 @@ impl PortalApplicationService {
                     OR k.onef_last_attempt_at < NOW() - make_interval(mins => $2)) \
                AND (r.ai_graded_at IS NOT NULL \
                     OR k.imported_at < NOW() - make_interval(mins => $3)) \
+               AND (NOT EXISTS (SELECT 1 FROM onef_vacancies \
+                                WHERE last_seen_at > NOW() - INTERVAL '1 day') \
+                    OR EXISTS (SELECT 1 FROM onef_vacancies o \
+                               WHERE o.is_active AND o.external_vacancy_id = k.vacancy_id::text)) \
              ORDER BY k.response_id, k.application_created_at",
         )
         .bind(ONEF_MAX_ATTEMPTS)

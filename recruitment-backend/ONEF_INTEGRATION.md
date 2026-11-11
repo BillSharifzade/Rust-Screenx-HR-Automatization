@@ -62,7 +62,7 @@ Applications left on job.koinotinav.tj come as the same event once the AI has gr
 - `candidate.city` and `candidate.about` are added. `about` is the text from the site form.
 - `vacancy_id` is `0` for a general application not tied to a vacancy.
 
-If 1F does not accept such an event (non-2xx, or `"success": false`), it is retried every 15 minutes, up to 12 times.
+An application is sent only once 1F knows its vacancy, meaning the vacancy appears in `getVacancies` with `ExternalVacancyId` equal to the job site number. Until then it waits and goes out automatically after 1F links the vacancy. If 1F does not accept an event (non-2xx, or `"success": false`), it is retried every 15 minutes, up to 12 times.
 
 ### 2.2 New Message (`new_message`)
 Triggered when a candidate sends a message via the Telegram bot.
