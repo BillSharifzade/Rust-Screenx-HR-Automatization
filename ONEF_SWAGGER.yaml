@@ -1352,9 +1352,10 @@ components:
           type: string
         source:
           type: string
+          enum: [telegram, job.koinotinav.tj]
           description: |
-            Absent for Telegram bot applications. `job.koinotinav.tj` for applications
-            left on the job site (imported from its API and sent once AI-graded).
+            Where the candidate applied: `telegram` (the bot) or `job.koinotinav.tj`
+            (the job site; imported from its API and sent once AI-graded).
         candidate:
           type: object
           properties:

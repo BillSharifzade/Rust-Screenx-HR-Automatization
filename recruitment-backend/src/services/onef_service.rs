@@ -15,7 +15,8 @@ pub struct OneFApplicationPayload {
     pub vacancy_name: String,
     pub candidate: OneFCandidateInfo,
     pub applied_at: String,
-    /// Where the application came from; absent for the Telegram bot.
+    /// Where the application came from: `telegram` (the bot) or
+    /// `job.koinotinav.tj` (the job site).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
@@ -96,6 +97,9 @@ pub struct OneFCandidateStatusPayload {
     pub status: String,
     pub updated_at: String,
 }
+
+/// `source` of applications made through the Telegram bot.
+pub const SOURCE_TELEGRAM: &str = "telegram";
 
 const PATH_CANDIDATE_RESPONSE: &str = "/action/candidateResponse";
 const PATH_POST_TEST_STATUS: &str = "/action/postTestStatus";
@@ -184,7 +188,7 @@ impl OneFService {
                 about: None,
             },
             applied_at: chrono::Utc::now().to_rfc3339(),
-            source: None,
+            source: Some(SOURCE_TELEGRAM.into()),
         };
 
         let wrapper = OneFRequestWrapper {
@@ -445,5 +449,53 @@ impl OneFService {
                 error!("1F {} → {} failed: {}", event_label, url, e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(telegram_id: Option<i64>, source: &str) -> serde_json::Value {
+        serde_json::to_value(OneFRequestWrapper {
+            request_body: OneFApplicationPayload {
+                event_type: "new_application".into(),
+                vacancy_id: 78,
+                vacancy_name: "Офис-менеджер".into(),
+                candidate: OneFCandidateInfo {
+                    id: uuid::Uuid::nil().to_string(),
+                    telegram_id,
+                    fullname: "Иван Петров".into(),
+                    name: "Иван".into(),
+                    surname: "Петров".into(),
+                    email: "a@b.tj".into(),
+                    phone: None,
+                    dob: None,
+                    cv_url: None,
+                    ai_rating: None,
+                    ai_comment: None,
+                    city: None,
+                    about: None,
+                },
+                applied_at: "2026-11-04T07:08:10.000000000+00:00".into(),
+                source: Some(source.into()),
+            },
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn every_application_says_where_it_came_from() {
+        let bot = payload(Some(123456789), SOURCE_TELEGRAM);
+        assert_eq!(bot["requestBody"]["source"], "telegram");
+        assert_eq!(bot["requestBody"]["candidate"]["telegram_id"], 123456789);
+        // Unchanged for the bot: no site-only keys.
+        assert!(bot["requestBody"]["candidate"].get("city").is_none());
+
+        let site = payload(None, "job.koinotinav.tj");
+        assert_eq!(site["requestBody"]["source"], "job.koinotinav.tj");
+        // Sent as an explicit null, not dropped: 1F's script reads the key.
+        assert!(site["requestBody"]["candidate"]["telegram_id"].is_null());
+        assert!(site["requestBody"]["candidate"].as_object().unwrap().contains_key("telegram_id"));
     }
 }

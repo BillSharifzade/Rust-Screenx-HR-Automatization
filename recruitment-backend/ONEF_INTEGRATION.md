@@ -39,6 +39,7 @@ Triggered when a candidate applies for a vacancy (internal or external).
     "vacancy_id": 123,
     "vacancy_name": "Senior Rust Developer",
     "applied_at": "2026-02-11T12:00:00Z",
+    "source": "telegram",
     "candidate": {
       "id": "uuid",
       "telegram_id": 123456789,
@@ -56,8 +57,10 @@ Triggered when a candidate applies for a vacancy (internal or external).
 }
 ```
 
+`source` says where the candidate applied: `telegram` for the bot, `job.koinotinav.tj` for the job site.
+
 Applications left on job.koinotinav.tj come as the same event once the AI has graded them, with these differences:
-- `"source": "job.koinotinav.tj"` is added.
+- `source` is `job.koinotinav.tj`.
 - `candidate.telegram_id` is `null` unless the applicant also used the bot.
 - `candidate.city` and `candidate.about` are added. `about` is the text from the site form.
 - `vacancy_id` is `0` for a general application not tied to a vacancy.
