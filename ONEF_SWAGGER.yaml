@@ -448,8 +448,14 @@ paths:
                   $ref: '#/components/schemas/OneFVacancyResponse'
   /vacancies/external:
     post:
-      summary: Create External Vacancy (Triggers Selenium Script)
-      description: Launches Python Selenium to create a vacancy in job.koinotinav.tj.
+      summary: Publish a vacancy on job.koinotinav.tj
+      description: |
+        Publishes the vacancy through the job board's API (no Selenium, no admin password).
+        Send `external_id` = the 1F vacancy number. A repeated call with the same
+        `external_id` updates that vacancy instead of publishing a second one, so it is
+        safe to retry. Without `external_id` a key is derived from the content.
+        `email`, `password` and `driver_binary` from the old contract are ignored.
+        Store the returned `vacancy_id` as `ExternalVacancyId`.
       tags:
         - Vacancies
       requestBody:
@@ -458,20 +464,66 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/OneFExternalVacancyPayload'
+            example:
+              external_id: "10234"
+              title: Главный бухгалтер
+              content: "<p>Требуется главный бухгалтер.</p>"
+              city: Душанбе
+              company: КОИНОТИ НАВ
+              direction: Финансы и бухгалтерия
+              hot: false
+              status: published
       responses:
         '202':
-          description: Workflow queued/accepted successfully
+          description: Published (`created` true) or updated (`created` false)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OneFExternalVacancyResult'
         '400':
-          description: Invalid payload
+          description: Invalid payload, unknown company/direction, or rejected by the job board
+        '502':
+          description: Job board unreachable or returned an error
+        '503':
+          description: Job board API key not configured, or job board rate limit hit
+
+  /vacancies/external/update:
+    post:
+      summary: Change some fields of a published vacancy
+      description: |
+        Find the vacancy by `vacancy_id` (job board id) or `external_id` (1F number) and
+        send only the fields that change. To link a vacancy published before 1F sent
+        numbers, pass its `vacancy_id` together with the new `external_id`.
+      tags:
+        - Vacancies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneFExternalVacancyUpdatePayload'
+            example:
+              external_id: "10234"
+              hot: true
+      responses:
+        '202':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFExternalVacancyResult'
+        '400':
+          description: Invalid payload or rejected by the job board
+        '404':
+          description: No such vacancy on the job board
 
   /vacancies/external/delete:
     post:
-      summary: Delete External Vacancy (Triggers Selenium Script)
-      description: Launches Python Selenium to delete an external vacancy.
+      summary: Take a vacancy off job.koinotinav.tj
+      description: |
+        The job board keeps the vacancy as `closed`: it leaves the site, but its page and
+        candidates' applications stay reachable. Find it by `vacancy_id` or `external_id`.
+        Repeating the call is harmless.
       tags:
         - Vacancies
       requestBody:
@@ -482,13 +534,28 @@ paths:
               $ref: '#/components/schemas/OneFExternalVacancyDeletePayload'
       responses:
         '202':
-          description: Workflow queued/accepted successfully
+          description: Taken off the site
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OneFExternalVacancyResult'
         '400':
-          description: Invalid payload
+          description: Neither `vacancy_id` nor `external_id` given
+        '404':
+          description: No such vacancy on the job board
+
+  /vacancies/external/options:
+    get:
+      summary: Values accepted for company, direction, city and status
+      tags:
+        - Vacancies
+      responses:
+        '200':
+          description: Current lists from the job board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneFExternalVacancyOptions'
 
   /vacancies/description:
     post:
@@ -1039,51 +1106,90 @@ components:
     OneFExternalVacancyPayload:
       type: object
       required:
-        - email
-        - password
         - title
         - content
       properties:
-        email:
+        external_id:
           type: string
-        password:
+          description: |
+            1F vacancy number (`VacancyId1F`; `vacancy_id_1f` is accepted too, string or
+            number). Same value again = update the same vacancy.
+        title:
           type: string
+        content:
+          type: string
+          description: Description HTML (`description` / `description_html` accepted too).
+        city:
+          type: string
+          nullable: true
+          description: Defaults to Душанбе.
+        direction:
+          type: string
+          nullable: true
+          description: Category name from `/vacancies/external/options` (case-insensitive).
+        category_id:
+          type: integer
+          nullable: true
+          description: Category id instead of `direction`.
+        company:
+          type: string
+          nullable: true
+          description: Company name from `/vacancies/external/options` (case-insensitive).
+        company_id:
+          type: integer
+          nullable: true
+          description: Company id instead of `company`.
+        hot:
+          type: boolean
+          default: false
+          description: Show in «Горячие вакансии» on the home page.
+        status:
+          type: string
+          enum: [published, draft, closed]
+          default: published
+
+    OneFExternalVacancyUpdatePayload:
+      type: object
+      description: |
+        `vacancy_id` or `external_id` finds the vacancy; every other field is optional
+        and only what is sent changes.
+      properties:
+        vacancy_id:
+          type: string
+          description: Job board id (string or number).
+        external_id:
+          type: string
+          description: 1F number. With `vacancy_id`, sets it on that vacancy.
         title:
           type: string
         content:
           type: string
         city:
           type: string
-          nullable: true
         direction:
           type: string
-          nullable: true
+        category_id:
+          type: integer
         company:
           type: string
-          nullable: true
+        company_id:
+          type: integer
         hot:
           type: boolean
-          default: false
-        driver_binary:
+        status:
           type: string
-          nullable: true
+          enum: [published, draft, closed]
 
     OneFExternalVacancyDeletePayload:
       type: object
-      required:
-        - email
-        - password
-        - vacancy_id
+      description: One of `vacancy_id` or `external_id` is required.
       properties:
-        email:
-          type: string
-        password:
-          type: string
         vacancy_id:
           type: string
-        driver_binary:
+          description: Job board id (string or number).
+        external_id:
           type: string
-          nullable: true
+          description: 1F number.
 
     OneFExternalVacancyResult:
       type: object
@@ -1094,13 +1200,43 @@ components:
           type: string
         vacancy_id:
           type: string
-          nullable: true
-        stdout:
+          description: Job board id, store as `ExternalVacancyId`.
+        external_id:
           type: string
           nullable: true
-        stderr:
+        status:
           type: string
-          nullable: true
+          enum: [published, draft, closed]
+        url:
+          type: string
+          description: Public page of the vacancy.
+        created:
+          type: boolean
+          description: Create only. `false` when an existing vacancy was updated.
+
+    OneFExternalVacancyOptions:
+      type: object
+      properties:
+        companies:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+        cities:
+          type: array
+          items: { type: string }
+        statuses:
+          type: array
+          items: { type: string }
 
     OneFGenerateDescriptionPayload:
       type: object

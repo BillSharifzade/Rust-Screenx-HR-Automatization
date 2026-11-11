@@ -20,42 +20,22 @@ RUN cargo build --release
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
+# poppler-utils and libreoffice-writer read CVs (PDF / DOC / DOCX / ODT).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        python3 \
-        python3-venv \
-        python3-pip \
-        chromium \
-        chromium-driver \
+        curl \
         fonts-liberation \
-        libglib2.0-0 \
-        libnss3 \
-        libx11-6 \
-        libxcomposite1 \
-        libxcursor1 \
-        libxdamage1 \
-        libxi6 \
-        libxtst6 \
-        libatk1.0-0 \
-        libatk-bridge2.0-0 \
-        libxrandr2 \
-        libgbm1 \
-        libasound2 \
-        libpangocairo-1.0-0 \
+        poppler-utils \
+        libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m pip install --no-cache-dir --break-system-packages selenium
 
 COPY --from=builder /app/target/release/recruitment-backend /usr/local/bin/recruitment-backend
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
 
 ENV SERVER_ADDRESS=0.0.0.0:8080 \
-    RUST_LOG=info \
-    VACANCY_PYTHON_BIN=/usr/bin/python3 \
-    VACANCY_SCRIPT_PATH=/app/scripts/vacancy_creation.py \
-    VACANCY_CHROME_BINARY=/usr/bin/chromium
+    RUST_LOG=info
 
 EXPOSE 8080
 

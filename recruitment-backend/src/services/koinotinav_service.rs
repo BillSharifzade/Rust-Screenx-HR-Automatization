@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use chrono::{DateTime, SecondsFormat, Utc};
-use reqwest::{header, Client, Response, StatusCode};
+use reqwest::{header, Client, Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
@@ -52,6 +52,44 @@ pub struct ExternalCompany {
     pub id: i64,
     pub title: String,
     pub logo: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalCategory {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Fields sent to `POST /vacancies` and `PATCH /vacancies/{id}`; `None` is left out.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VacancyFields {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_html: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_hot: Option<bool>,
+    /// `published`, `draft` or `closed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+/// A vacancy as the board stored it after a write.
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardVacancy {
+    pub id: i64,
+    pub title: String,
+    pub status: String,
+    pub url: String,
+    pub external_id: Option<String>,
 }
 
 /// A candidate's application left on the board (`GET /applications`).
@@ -115,6 +153,9 @@ struct ApiVacancy {
     city: Option<String>,
     company: Option<ApiRef>,
     category: Option<ApiRef>,
+    status: Option<String>,
+    url: Option<String>,
+    external_id: Option<String>,
     published_at: Option<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
@@ -127,10 +168,29 @@ struct ApiRef {
 }
 
 #[derive(Deserialize)]
+struct ApiError {
+    message: Option<String>,
+    #[serde(default)]
+    errors: HashMap<String, Vec<String>>,
+}
+
+#[derive(Deserialize)]
 struct ApiCompany {
     id: i64,
     name: Option<String>,
     logo_url: Option<String>,
+}
+
+impl From<ApiVacancy> for BoardVacancy {
+    fn from(v: ApiVacancy) -> Self {
+        BoardVacancy {
+            id: v.id,
+            title: v.title.unwrap_or_default(),
+            status: v.status.unwrap_or_default(),
+            url: v.url.unwrap_or_default(),
+            external_id: v.external_id,
+        }
+    }
 }
 
 impl From<ApiVacancy> for ExternalVacancy {
@@ -179,6 +239,7 @@ struct Cache {
 struct Snapshot {
     vacancies: Vec<ExternalVacancy>,
     companies: Vec<ExternalCompany>,
+    categories: Vec<ExternalCategory>,
     fetched_at: Instant,
 }
 
@@ -244,6 +305,74 @@ impl KoinotinavService {
 
     pub async fn fetch_companies(&self) -> Result<Vec<ExternalCompany>> {
         Ok(self.snapshot().await?.companies.clone())
+    }
+
+    pub async fn fetch_categories(&self) -> Result<Vec<ExternalCategory>> {
+        Ok(self.snapshot().await?.categories.clone())
+    }
+
+    /// `POST /vacancies`: creates the vacancy, or updates the one already
+    /// carrying `fields.external_id`. Returns whether it was created.
+    pub async fn upsert_vacancy(&self, fields: &VacancyFields) -> Result<(BoardVacancy, bool)> {
+        let body = serde_json::to_value(fields)?;
+        let resp = self
+            .send(Method::POST, "/vacancies", &[], Some(&body), true, "application/json")
+            .await?
+            .ok_or_else(|| Error::BadGateway("Job board POST /vacancies not found".into()))?;
+        let created = resp.status() == StatusCode::CREATED;
+        let vacancy: Envelope<ApiVacancy> = decode(resp, "/vacancies").await?;
+        self.refresh_in_background();
+        Ok((vacancy.data.into(), created))
+    }
+
+    /// `PATCH /vacancies/{id}`; `None` when the board has no such vacancy.
+    pub async fn update_vacancy(&self, id: i64, fields: &VacancyFields) -> Result<Option<BoardVacancy>> {
+        let path = format!("/vacancies/{}", id);
+        let body = serde_json::to_value(fields)?;
+        let Some(resp) = self
+            .send(Method::PATCH, &path, &[], Some(&body), true, "application/json")
+            .await?
+        else {
+            return Ok(None);
+        };
+        let vacancy: Envelope<ApiVacancy> = decode(resp, &path).await?;
+        self.refresh_in_background();
+        Ok(Some(vacancy.data.into()))
+    }
+
+    /// `DELETE /vacancies/{id}`: takes the vacancy off the site (status `closed`;
+    /// the board keeps the record). `false` when there is no such vacancy.
+    pub async fn close_vacancy(&self, id: i64) -> Result<bool> {
+        let path = format!("/vacancies/{}", id);
+        let closed = self
+            .send(Method::DELETE, &path, &[], None, true, "application/json")
+            .await?
+            .is_some();
+        if closed {
+            self.refresh_in_background();
+        }
+        Ok(closed)
+    }
+
+    /// The board id of the vacancy carrying this 1F number, in any status.
+    pub async fn find_vacancy_by_external_id(&self, external_id: &str) -> Result<Option<BoardVacancy>> {
+        let query = [
+            ("external_id", external_id.to_string()),
+            ("status", "all".to_string()),
+            ("per_page", "1".to_string()),
+        ];
+        let page: Option<Page<ApiVacancy>> = self.get_json("/vacancies", &query, false).await?;
+        Ok(page.and_then(|p| p.data.into_iter().next()).map(Into::into))
+    }
+
+    /// Picks up a write without waiting for the next scheduled refresh.
+    fn refresh_in_background(&self) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = this.refresh(true).await {
+                tracing::warn!("Job board refresh after a write failed: {}", e);
+            }
+        });
     }
 
     pub async fn fetch_vacancy(&self, id: i64) -> Result<Option<ExternalVacancy>> {
@@ -355,9 +484,10 @@ impl KoinotinavService {
         }
 
         let started = Instant::now();
-        let (vacancies, companies) = tokio::try_join!(
+        let (vacancies, companies, categories) = tokio::try_join!(
             self.get_all_pages::<ApiVacancy>("/vacancies", vec![("per_page", PER_PAGE.to_string())], false),
             self.get_json::<Envelope<Vec<ApiCompany>>>("/companies", &[], false),
+            self.get_json::<Envelope<Vec<ApiRef>>>("/categories", &[], false),
         )?;
         let mut vacancies: Vec<ExternalVacancy> =
             vacancies.into_iter().map(ExternalVacancy::from).collect();
@@ -373,16 +503,27 @@ impl KoinotinavService {
                 logo: c.logo_url.unwrap_or_default(),
             })
             .collect();
+        let categories: Vec<ExternalCategory> = categories
+            .ok_or_else(|| Error::BadGateway("Job board /categories not found".into()))?
+            .data
+            .into_iter()
+            .map(|c| ExternalCategory {
+                id: c.id,
+                name: c.name.unwrap_or_default().trim().to_string(),
+            })
+            .collect();
 
         tracing::info!(
-            "Job board snapshot: {} vacancies, {} companies ({} ms)",
+            "Job board snapshot: {} vacancies, {} companies, {} categories ({} ms)",
             vacancies.len(),
             companies.len(),
+            categories.len(),
             started.elapsed().as_millis()
         );
         let snapshot = Arc::new(Snapshot {
             vacancies,
             companies,
+            categories,
             fetched_at: Instant::now(),
         });
         self.cache.write().await.snapshot = Some(snapshot.clone());
@@ -422,17 +563,12 @@ impl KoinotinavService {
         query: &[(&str, String)],
         keyed: bool,
     ) -> Result<Option<T>> {
-        let Some(resp) = self.get(path, query, keyed, "application/json").await? else {
-            return Ok(None);
-        };
-        let body = resp.bytes().await?;
-        serde_json::from_slice(&body).map(Some).map_err(|e| {
-            Error::BadGateway(format!("Job board sent an unexpected {} response: {}", path, e))
-        })
+        match self.get(path, query, keyed, "application/json").await? {
+            Some(resp) => decode(resp, path).await.map(Some),
+            None => Ok(None),
+        }
     }
 
-    /// GETs an API path; `None` means 404. Server errors and network failures
-    /// are retried once.
     async fn get(
         &self,
         path: &str,
@@ -440,11 +576,30 @@ impl KoinotinavService {
         keyed: bool,
         accept: &str,
     ) -> Result<Option<Response>> {
+        self.send(Method::GET, path, query, None, keyed, accept).await
+    }
+
+    /// Calls an API path; `None` means 404. Server errors and network failures
+    /// are retried once, which is safe for every call made here: reads, PATCH,
+    /// DELETE, and POST /vacancies (idempotent by `external_id`).
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<&serde_json::Value>,
+        keyed: bool,
+        accept: &str,
+    ) -> Result<Option<Response>> {
         let url = format!("{}{}{}", self.base_url, API_PREFIX, path);
         let key = match (keyed, &self.api_key) {
             (false, _) => None,
             (true, Some(key)) => Some(key.clone()),
-            (true, None) => return Err(Error::Config("KOINOTINAV_API_KEY is not set".into())),
+            (true, None) => {
+                return Err(Error::ServiceUnavailable(
+                    "KOINOTINAV_API_KEY is not set; the job board API needs it for this call".into(),
+                ))
+            }
         };
         let mut last_error = None;
         for attempt in 0..2 {
@@ -453,11 +608,14 @@ impl KoinotinavService {
             }
             let mut request = self
                 .client
-                .get(&url)
+                .request(method.clone(), &url)
                 .query(query)
                 .header(header::ACCEPT, accept);
             if let Some(key) = &key {
                 request = request.header("X-Api-Key", key.as_ref());
+            }
+            if let Some(body) = body {
+                request = request.json(body);
             }
             match request.send().await {
                 Ok(resp) if resp.status().is_success() => return Ok(Some(resp)),
@@ -466,6 +624,15 @@ impl KoinotinavService {
                     return Err(Error::BadGateway(format!(
                         "Job board rejected the API key ({}) for {}",
                         resp.status(),
+                        path
+                    )))
+                }
+                Ok(resp) if resp.status() == StatusCode::UNPROCESSABLE_ENTITY => {
+                    return Err(Error::BadRequest(rejection_message(resp, path).await))
+                }
+                Ok(resp) if resp.status() == StatusCode::TOO_MANY_REQUESTS => {
+                    return Err(Error::ServiceUnavailable(format!(
+                        "Job board rate limit hit on {} (120 requests/min); retry later",
                         path
                     )))
                 }
@@ -487,6 +654,39 @@ impl KoinotinavService {
             }
         }
         Err(last_error.unwrap_or_else(|| Error::BadGateway(format!("Job board request {} failed", path))))
+    }
+}
+
+async fn decode<T: DeserializeOwned>(resp: Response, path: &str) -> Result<T> {
+    let body = resp.bytes().await?;
+    serde_json::from_slice(&body).map_err(|e| {
+        Error::BadGateway(format!("Job board sent an unexpected {} response: {}", path, e))
+    })
+}
+
+/// Turns a Laravel `422 {message, errors}` into one readable line.
+async fn rejection_message(resp: Response, path: &str) -> String {
+    let body = resp.bytes().await.unwrap_or_default();
+    match serde_json::from_slice::<ApiError>(&body) {
+        Ok(err) => {
+            let mut fields: Vec<String> = err
+                .errors
+                .into_iter()
+                .map(|(field, msgs)| format!("{}: {}", field, msgs.join(" ")))
+                .collect();
+            fields.sort();
+            let message = err.message.unwrap_or_else(|| "validation failed".into());
+            if fields.is_empty() {
+                format!("Job board rejected {}: {}", path, message)
+            } else {
+                format!("Job board rejected {}: {} ({})", path, message, fields.join("; "))
+            }
+        }
+        Err(_) => format!(
+            "Job board rejected {}: {}",
+            path,
+            String::from_utf8_lossy(&body).chars().take(300).collect::<String>()
+        ),
     }
 }
 

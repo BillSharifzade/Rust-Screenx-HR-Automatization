@@ -218,8 +218,10 @@ sequenceDiagram
 |--------|------|---------|-------------|
 | `GET` | `/api/onef/vacancies` | [list_vacancies](file:///home/qwantum/Documents/projects/Rust-Screenx-HR-Automatization/recruitment-backend/src/routes/onef.rs#L331-L365) | Combined internal + external vacancies |
 | `GET` | `/api/onef/vacancies/:id` | [get_vacancy](file:///home/qwantum/Documents/projects/Rust-Screenx-HR-Automatization/recruitment-backend/src/routes/onef.rs#L367-L393) | Single vacancy (UUID or numeric ID) |
-| `POST` | `/api/onef/vacancies/external` | [create_external_vacancy](file:///home/qwantum/Documents/projects/Rust-Screenx-HR-Automatization/recruitment-backend/src/routes/external_vacancy.rs#L14-L28) | Create vacancy on job.koinotinav.tj via Selenium |
-| `POST` | `/api/onef/vacancies/external/delete` | [delete_external_vacancy](file:///home/qwantum/Documents/projects/Rust-Screenx-HR-Automatization/recruitment-backend/src/routes/external_vacancy.rs#L30-L44) | Delete external vacancy via Selenium |
+| `POST` | `/api/onef/vacancies/external` | create_external_vacancy | Publish a vacancy on job.koinotinav.tj through its API (upsert by `external_id` = 1F number) |
+| `POST` | `/api/onef/vacancies/external/update` | update_external_vacancy | Change fields of a job board vacancy (by `vacancy_id` or `external_id`) |
+| `POST` | `/api/onef/vacancies/external/delete` | delete_external_vacancy | Take a vacancy off the job board (kept as `closed`) |
+| `GET` | `/api/onef/vacancies/external/options` | external_vacancy_options | Companies, categories, cities and statuses the job board accepts |
 | `POST` | `/api/onef/vacancies/description` | [generate_vacancy_description](file:///home/qwantum/Documents/projects/Rust-Screenx-HR-Automatization/recruitment-backend/src/routes/integration.rs#L444-L455) | AI-generate vacancy description |
 
 ---

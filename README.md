@@ -70,7 +70,7 @@ docker run \
 
 Notes:
 - Inside Docker, `localhost` refers to the container. Set `DATABASE_URL` to the host/IP (e.g., `postgres://postgres:password@10.10.10.25:5432/recruitment_db`).
-- Selenium automation expects `VACANCY_PYTHON_BIN`, `VACANCY_SCRIPT_PATH`, and `VACANCY_CHROME_BINARY` (defaults baked into the image). Override if running outside Docker.
+- `KOINOTINAV_API_KEY` is the job.koinotinav.tj API key. It is needed to publish vacancies there and to import applications from the site. Without it, vacancies are still read, because that part of their API is public.
 - Startup runs `sqlx::migrate!`, so begin with an empty database or ensure `_sqlx_migrations` is in sync.
 
 ## Endpoint Guide
@@ -90,8 +90,10 @@ Notes:
   - `POST /api/integration/ai-jobs` — enqueue AI test generation and return job ID.
   - `GET /api/integration/ai-jobs/:id` — poll AI job progress/result.
   - `POST /api/integration/tests/spec` — generate & persist a test from blueprint specs.
-  - `POST /api/integration/vacancies/external` — trigger Selenium vacancy creation.
-  - `POST /api/integration/vacancies/external/delete` — trigger Selenium vacancy deletion by ID.
+  - `POST /api/onef/vacancies/external` publishes a vacancy on job.koinotinav.tj through its API. It upserts by `external_id`, which is the 1F vacancy number.
+  - `POST /api/onef/vacancies/external/update` changes some fields of a vacancy, found by `vacancy_id` or `external_id`.
+  - `POST /api/onef/vacancies/external/delete` takes a vacancy off the site. The board keeps it as `closed`.
+  - `GET /api/onef/vacancies/external/options` lists the company, category (`direction`) and city values the board accepts.
 
 - **Public Candidate API** (token-based under `/api/public/*`)
   - `GET /api/public/tests/:token` — fetch test metadata and questions for a candidate.

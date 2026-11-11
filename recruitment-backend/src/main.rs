@@ -273,8 +273,16 @@ async fn main() -> anyhow::Result<()> {
             post(routes::external_vacancy::create_external_vacancy),
         )
         .route(
+            "/api/onef/vacancies/external/update",
+            post(routes::external_vacancy::update_external_vacancy),
+        )
+        .route(
             "/api/onef/vacancies/external/delete",
             post(routes::external_vacancy::delete_external_vacancy),
+        )
+        .route(
+            "/api/onef/vacancies/external/options",
+            get(routes::external_vacancy::external_vacancy_options),
         )
         .route(
             "/api/integration/vacancies/:id",
