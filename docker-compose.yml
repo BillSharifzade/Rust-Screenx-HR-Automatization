@@ -26,6 +26,7 @@ services:
       - ONEF_WEBHOOK_URL=${ONEF_WEBHOOK_URL:-}
       - ONEF_READ_BASE_URL=${ONEF_READ_BASE_URL:-}
       - ONEF_VACANCY_SYNC_INTERVAL_SECS=${ONEF_VACANCY_SYNC_INTERVAL_SECS:-600}
+      - KOINOTINAV_API_KEY=${KOINOTINAV_API_KEY:-}
       - RUST_LOG=info,recruitment_backend=debug
     volumes:
       - ./uploads:/app/uploads

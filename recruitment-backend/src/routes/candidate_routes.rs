@@ -27,7 +27,7 @@ pub struct ApplyVacancyRequest {
     pub vacancy_name: Option<String>,
 }
 
-async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
+pub(crate) async fn save_cv_file(filename: &str, data: &bytes::Bytes) -> Result<String> {
     let ext = StdPath::new(filename)
         .extension()
         .and_then(|e| e.to_str())

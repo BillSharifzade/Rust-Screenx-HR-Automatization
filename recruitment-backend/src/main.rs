@@ -33,6 +33,30 @@ async fn main() -> anyhow::Result<()> {
     app_state.koinotinav_service.spawn_background_refresh();
 
     {
+        let importer = recruitment_backend::services::portal_application_service::PortalApplicationService::new(
+            app_state.pool.clone(),
+            app_state.koinotinav_service.clone(),
+        );
+        if importer.is_enabled() {
+            tokio::spawn(async move {
+                loop {
+                    match importer.sync().await {
+                        Ok(r) if r.imported > 0 || r.failed > 0 => info!(
+                            "Job board applications: {} imported, {} failed ({} fetched)",
+                            r.imported, r.failed, r.fetched
+                        ),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("Job board application import failed: {}", e),
+                    }
+                    tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+                }
+            });
+        } else {
+            tracing::warn!("KOINOTINAV_API_KEY is not set; job board applications are not imported");
+        }
+    }
+
+    {
         tokio::spawn(async move {
             loop {
                 let config = get_config();
