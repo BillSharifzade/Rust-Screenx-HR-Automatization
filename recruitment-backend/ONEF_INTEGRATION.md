@@ -56,6 +56,14 @@ Triggered when a candidate applies for a vacancy (internal or external).
 }
 ```
 
+Applications left on job.koinotinav.tj come as the same event once the AI has graded them, with these differences:
+- `"source": "job.koinotinav.tj"` is added.
+- `candidate.telegram_id` is `null` unless the applicant also used the bot.
+- `candidate.city` and `candidate.about` are added. `about` is the text from the site form.
+- `vacancy_id` is `0` for a general application not tied to a vacancy.
+
+If 1F does not accept such an event (non-2xx, or `"success": false`), it is retried every 15 minutes, up to 12 times.
+
 ### 2.2 New Message (`new_message`)
 Triggered when a candidate sends a message via the Telegram bot.
 ```json

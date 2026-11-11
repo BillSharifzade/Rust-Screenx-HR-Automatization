@@ -1350,6 +1350,11 @@ components:
           type: integer
         vacancy_name:
           type: string
+        source:
+          type: string
+          description: |
+            Absent for Telegram bot applications. `job.koinotinav.tj` for applications
+            left on the job site (imported from its API and sent once AI-graded).
         candidate:
           type: object
           properties:
@@ -1358,6 +1363,8 @@ components:
               format: uuid
             telegram_id:
               type: integer
+              nullable: true
+              description: "`null` for job site applicants who never used the bot."
             fullname:
               type: string
             name:
@@ -1376,6 +1383,12 @@ components:
               type: integer
             ai_comment:
               type: string
+            city:
+              type: string
+              description: Job site applications only.
+            about:
+              type: string
+              description: Job site applications only. What the candidate wrote about themselves.
         applied_at:
           type: string
           format: date-time

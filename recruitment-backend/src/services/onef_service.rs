@@ -15,6 +15,9 @@ pub struct OneFApplicationPayload {
     pub vacancy_name: String,
     pub candidate: OneFCandidateInfo,
     pub applied_at: String,
+    /// Where the application came from; absent for the Telegram bot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +30,8 @@ pub struct OneFGradePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFCandidateInfo {
     pub id: String,
-    pub telegram_id: i64,
+    /// `null` for candidates who applied on job.koinotinav.tj and never used the bot.
+    pub telegram_id: Option<i64>,
     pub fullname: String,
     pub name: String,
     pub surname: String,
@@ -42,6 +46,11 @@ pub struct OneFCandidateInfo {
     pub ai_rating: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_comment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    /// What the candidate wrote about themselves in the job site form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneFWebhookResponse {
@@ -161,7 +170,7 @@ impl OneFService {
             vacancy_name,
             candidate: OneFCandidateInfo {
                 id: candidate_id.to_string(),
-                telegram_id,
+                telegram_id: Some(telegram_id),
                 fullname,
                 name: first_name,
                 surname: last_name,
@@ -171,8 +180,11 @@ impl OneFService {
                 cv_url: full_cv_url,
                 ai_rating,
                 ai_comment,
+                city: None,
+                about: None,
             },
             applied_at: chrono::Utc::now().to_rfc3339(),
+            source: None,
         };
 
         let wrapper = OneFRequestWrapper {
@@ -193,6 +205,49 @@ impl OneFService {
 
         self.fan_out_post(&urls, &body, "new_application").await;
         Ok(())
+    }
+
+    /// Sends a `new_application` event and reports whether 1F took it: at least
+    /// one target answered 2xx without `"success": false`. Unlike the other
+    /// notifications the caller retries on failure, so the outcome matters.
+    pub async fn deliver_application(&self, payload: OneFApplicationPayload) -> Result<(), String> {
+        if self.base_urls.is_empty() {
+            return Err("1F integration is disabled".into());
+        }
+        let body = serde_json::to_value(OneFRequestWrapper { request_body: payload })
+            .map_err(|e| format!("Serialization error: {}", e))?;
+        let mut delivered = false;
+        let mut errors = Vec::new();
+        for base in &self.base_urls {
+            let url = format!("{}{}", base, PATH_CANDIDATE_RESPONSE);
+            match self.client.post(&url).json(&body).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    let refused = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| v.get("success").and_then(|s| s.as_bool()))
+                        == Some(false);
+                    if status.is_success() && !refused {
+                        info!("1F new_application → {} returned {}", url, status);
+                        delivered = true;
+                    } else {
+                        let excerpt: String = text.chars().take(300).collect();
+                        warn!("1F new_application → {} returned {}: {}", url, status, excerpt);
+                        errors.push(format!("{} returned {}: {}", url, status, excerpt));
+                    }
+                }
+                Err(e) => {
+                    error!("1F new_application → {} failed: {}", url, e);
+                    errors.push(format!("{} failed: {}", url, e));
+                }
+            }
+        }
+        if delivered {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     pub async fn notify_grade(

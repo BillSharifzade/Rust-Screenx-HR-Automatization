@@ -5,6 +5,9 @@
 //! response for its vacancy; the AI grading worker picks the response up like
 //! any other. Imported application ids are recorded in `koinotinav_applications`
 //! and never imported twice, even if HR later deletes the candidate.
+//!
+//! Once graded, each one is forwarded to 1F as a `new_application` event, the
+//! same one the Telegram bot sends. Delivery is recorded and retried.
 
 use std::collections::HashSet;
 
@@ -15,6 +18,7 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::services::koinotinav_service::{KoinotinavService, PortalApplication};
+use crate::services::onef_service::{OneFApplicationPayload, OneFCandidateInfo, OneFService};
 
 /// `responses.vacancy_id` for a general application not tied to a vacancy.
 pub const NO_VACANCY_ID: i64 = 0;
@@ -22,11 +26,44 @@ const NO_VACANCY_TITLE: &str = "Без вакансии (анкета с сай�
 /// Re-read this far behind the newest imported application, so one that was
 /// saved on the board with a slightly older timestamp is not missed.
 const SINCE_OVERLAP_HOURS: i64 = 24;
+/// 1F gets the event with the AI grade; if grading has not finished by then,
+/// it is sent without one.
+const ONEF_GRADE_WAIT_MINUTES: i64 = 10;
+const ONEF_RETRY_MINUTES: i64 = 15;
+const ONEF_MAX_ATTEMPTS: i32 = 12;
+pub const SOURCE: &str = "job.koinotinav.tj";
 
 #[derive(Clone)]
 pub struct PortalApplicationService {
     pool: PgPool,
     board: KoinotinavService,
+    onef: OneFService,
+    webapp_url: String,
+}
+
+#[derive(Debug, Default)]
+pub struct ForwardReport {
+    pub sent: usize,
+    pub failed: usize,
+}
+
+#[derive(sqlx::FromRow)]
+struct PendingForward {
+    response_id: Uuid,
+    vacancy_id: i64,
+    vacancy_title: Option<String>,
+    application_created_at: DateTime<Utc>,
+    ai_grade: Option<i32>,
+    ai_comment: Option<String>,
+    candidate_id: Uuid,
+    telegram_id: Option<i64>,
+    name: String,
+    email: String,
+    phone: Option<String>,
+    dob: Option<NaiveDate>,
+    cv_url: Option<String>,
+    city: Option<String>,
+    about: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -37,12 +74,108 @@ pub struct SyncReport {
 }
 
 impl PortalApplicationService {
-    pub fn new(pool: PgPool, board: KoinotinavService) -> Self {
-        Self { pool, board }
+    pub fn new(pool: PgPool, board: KoinotinavService, onef: OneFService, webapp_url: String) -> Self {
+        Self {
+            pool,
+            board,
+            onef,
+            webapp_url: webapp_url.trim_end_matches('/').to_string(),
+        }
     }
 
     pub fn is_enabled(&self) -> bool {
         self.board.has_api_key()
+    }
+
+    /// Sends graded, not yet delivered applications to 1F, oldest first.
+    pub async fn forward_to_onef(&self) -> Result<ForwardReport> {
+        let mut report = ForwardReport::default();
+        if !self.onef.is_enabled() {
+            return Ok(report);
+        }
+        let mut pending: Vec<PendingForward> = sqlx::query_as(
+            "SELECT DISTINCT ON (k.response_id) \
+                k.response_id, k.vacancy_id, r.vacancy_title, k.application_created_at, \
+                r.ai_grade, r.ai_comment, c.id AS candidate_id, c.telegram_id, c.name, c.email, \
+                c.phone, c.dob, c.cv_url, \
+                c.profile_data->>'city' AS city, c.profile_data->>'about' AS about \
+             FROM koinotinav_applications k \
+             JOIN responses r ON r.id = k.response_id \
+             JOIN candidates c ON c.id = r.candidate_id \
+             WHERE k.onef_sent_at IS NULL \
+               AND k.onef_attempts < $1 \
+               AND (k.onef_last_attempt_at IS NULL \
+                    OR k.onef_last_attempt_at < NOW() - make_interval(mins => $2)) \
+               AND (r.ai_graded_at IS NOT NULL \
+                    OR k.imported_at < NOW() - make_interval(mins => $3)) \
+             ORDER BY k.response_id, k.application_created_at",
+        )
+        .bind(ONEF_MAX_ATTEMPTS)
+        .bind(ONEF_RETRY_MINUTES as i32)
+        .bind(ONEF_GRADE_WAIT_MINUTES as i32)
+        .fetch_all(&self.pool)
+        .await?;
+        pending.sort_by_key(|p| p.application_created_at);
+
+        for p in pending {
+            let response_id = p.response_id;
+            let outcome = self.onef.deliver_application(self.onef_payload(p)).await;
+            let error = outcome.as_ref().err().cloned();
+            sqlx::query(
+                "UPDATE koinotinav_applications SET \
+                    onef_sent_at = CASE WHEN $2::text IS NULL THEN NOW() END, \
+                    onef_attempts = onef_attempts + 1, \
+                    onef_last_attempt_at = NOW(), \
+                    onef_last_error = $2 \
+                 WHERE response_id = $1 AND onef_sent_at IS NULL",
+            )
+            .bind(response_id)
+            .bind(&error)
+            .execute(&self.pool)
+            .await?;
+            match error {
+                None => report.sent += 1,
+                Some(e) => {
+                    report.failed += 1;
+                    tracing::warn!("Response {} not delivered to 1F: {}", response_id, e);
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    fn onef_payload(&self, p: PendingForward) -> OneFApplicationPayload {
+        let fullname = p.name.trim().to_string();
+        let (first, last) = match fullname.split_once(' ') {
+            Some((first, rest)) => (first.to_string(), rest.trim().to_string()),
+            None => (fullname.clone(), String::new()),
+        };
+        OneFApplicationPayload {
+            event_type: "new_application".into(),
+            vacancy_id: p.vacancy_id,
+            vacancy_name: p
+                .vacancy_title
+                .unwrap_or_else(|| format!("Vacancy #{}", p.vacancy_id)),
+            candidate: OneFCandidateInfo {
+                id: p.candidate_id.to_string(),
+                telegram_id: p.telegram_id,
+                fullname,
+                name: first,
+                surname: last,
+                email: p.email,
+                phone: p.phone,
+                dob: p.dob.map(|d| d.format("%Y-%m-%d").to_string()),
+                cv_url: p.cv_url.map(|path| format!("{}/{}", self.webapp_url, path.trim_start_matches('/'))),
+                ai_rating: p.ai_grade,
+                // Without a grade the comment is only "AI grading unavailable";
+                // the Telegram flow sends nothing in that case either.
+                ai_comment: p.ai_grade.and(p.ai_comment),
+                city: p.city.filter(|s| !s.trim().is_empty()),
+                about: p.about.filter(|s| !s.trim().is_empty()),
+            },
+            applied_at: p.application_created_at.to_rfc3339(),
+            source: Some(SOURCE.into()),
+        }
     }
 
     pub async fn sync(&self) -> Result<SyncReport> {

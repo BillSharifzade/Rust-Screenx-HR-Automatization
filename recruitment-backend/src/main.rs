@@ -36,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
         let importer = recruitment_backend::services::portal_application_service::PortalApplicationService::new(
             app_state.pool.clone(),
             app_state.koinotinav_service.clone(),
+            app_state.onef_service.clone(),
+            config.webapp_url.clone(),
         );
         if importer.is_enabled() {
             tokio::spawn(async move {
@@ -48,7 +50,16 @@ async fn main() -> anyhow::Result<()> {
                         Ok(_) => {}
                         Err(e) => tracing::warn!("Job board application import failed: {}", e),
                     }
-                    tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+                    // Picks up applications the AI graded since the last pass.
+                    match importer.forward_to_onef().await {
+                        Ok(r) if r.sent > 0 || r.failed > 0 => info!(
+                            "Job board applications to 1F: {} sent, {} failed",
+                            r.sent, r.failed
+                        ),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("Forwarding job board applications to 1F failed: {}", e),
+                    }
+                    tokio::time::sleep(Duration::from_secs(2 * 60)).await;
                 }
             });
         } else {
