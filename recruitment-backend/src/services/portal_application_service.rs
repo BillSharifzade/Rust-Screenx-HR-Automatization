@@ -173,7 +173,12 @@ impl PortalApplicationService {
                 city: p.city.filter(|s| !s.trim().is_empty()),
                 about: p.about.filter(|s| !s.trim().is_empty()),
             },
-            applied_at: p.application_created_at.to_rfc3339(),
+            // Same shape as the Telegram flow's `Utc::now().to_rfc3339()`
+            // ("…:10.075543123+00:00"). 1F's script cannot parse whole seconds
+            // ("…:10+00:00"): "Can not parse string 1793776090 to date with time".
+            applied_at: p
+                .application_created_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, false),
             source: Some(SOURCE.into()),
         }
     }
