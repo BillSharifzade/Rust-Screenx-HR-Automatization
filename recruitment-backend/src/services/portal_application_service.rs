@@ -18,7 +18,9 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::services::koinotinav_service::{KoinotinavService, PortalApplication};
-use crate::services::onef_service::{OneFApplicationPayload, OneFCandidateInfo, OneFService};
+use crate::services::onef_service::{
+    OneFApplicationPayload, OneFCandidateInfo, OneFService, SOURCE_JOB_SITE,
+};
 
 /// `responses.vacancy_id` for a general application not tied to a vacancy.
 pub const NO_VACANCY_ID: i64 = 0;
@@ -31,7 +33,6 @@ const SINCE_OVERLAP_HOURS: i64 = 24;
 const ONEF_GRADE_WAIT_MINUTES: i64 = 10;
 const ONEF_RETRY_MINUTES: i64 = 15;
 const ONEF_MAX_ATTEMPTS: i32 = 12;
-pub const SOURCE: &str = "job.koinotinav.tj";
 
 #[derive(Clone)]
 pub struct PortalApplicationService {
@@ -188,7 +189,7 @@ impl PortalApplicationService {
             applied_at: p
                 .application_created_at
                 .to_rfc3339_opts(chrono::SecondsFormat::Nanos, false),
-            source: Some(SOURCE.into()),
+            source: Some(SOURCE_JOB_SITE),
         }
     }
 

@@ -1351,11 +1351,14 @@ components:
         vacancy_name:
           type: string
         source:
-          type: string
-          enum: [telegram, job.koinotinav.tj]
+          type: integer
+          enum: [1, 2]
+          example: 1
           description: |
-            Where the candidate applied: `telegram` (the bot) or `job.koinotinav.tj`
-            (the job site; imported from its API and sent once AI-graded).
+            Where the candidate applied, as an ID:
+            `1` — Telegram bot; `2` — job.koinotinav.tj (imported from its API and
+            sent once AI-graded). New sources get the next number; an existing
+            number never changes meaning. Treat an unknown number as "other".
         candidate:
           type: object
           properties:

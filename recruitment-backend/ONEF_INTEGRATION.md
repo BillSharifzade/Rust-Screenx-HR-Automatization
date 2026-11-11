@@ -39,7 +39,7 @@ Triggered when a candidate applies for a vacancy (internal or external).
     "vacancy_id": 123,
     "vacancy_name": "Senior Rust Developer",
     "applied_at": "2026-02-11T12:00:00Z",
-    "source": "telegram",
+    "source": 1,
     "candidate": {
       "id": "uuid",
       "telegram_id": 123456789,
@@ -57,10 +57,17 @@ Triggered when a candidate applies for a vacancy (internal or external).
 }
 ```
 
-`source` says where the candidate applied: `telegram` for the bot, `job.koinotinav.tj` for the job site.
+`source` says where the candidate applied, as an ID:
+
+| `source` | Where |
+|---|---|
+| `1` | Telegram bot |
+| `2` | job.koinotinav.tj |
+
+New sources get the next number; an existing number never changes meaning. 1F should treat an unknown number as "other" rather than reject the event.
 
 Applications left on job.koinotinav.tj come as the same event once the AI has graded them, with these differences:
-- `source` is `job.koinotinav.tj`.
+- `source` is `2`.
 - `candidate.telegram_id` is `null` unless the applicant also used the bot.
 - `candidate.city` and `candidate.about` are added. `about` is the text from the site form.
 - `vacancy_id` is `0` for a general application not tied to a vacancy.

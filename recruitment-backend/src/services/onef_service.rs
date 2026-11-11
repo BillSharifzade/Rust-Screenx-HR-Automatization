@@ -15,10 +15,9 @@ pub struct OneFApplicationPayload {
     pub vacancy_name: String,
     pub candidate: OneFCandidateInfo,
     pub applied_at: String,
-    /// Where the application came from: `telegram` (the bot) or
-    /// `job.koinotinav.tj` (the job site).
+    /// Where the application came from, as a number: see `SOURCE_*`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub source: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,8 +97,12 @@ pub struct OneFCandidateStatusPayload {
     pub updated_at: String,
 }
 
-/// `source` of applications made through the Telegram bot.
-pub const SOURCE_TELEGRAM: &str = "telegram";
+/// `source` of a `new_application`. 1F stores the number, so a new source
+/// needs no change on their side: append the next number here, never reuse one.
+/// Applied through the Telegram bot.
+pub const SOURCE_TELEGRAM: i32 = 1;
+/// Applied on job.koinotinav.tj, imported from its API.
+pub const SOURCE_JOB_SITE: i32 = 2;
 
 const PATH_CANDIDATE_RESPONSE: &str = "/action/candidateResponse";
 const PATH_POST_TEST_STATUS: &str = "/action/postTestStatus";
@@ -188,7 +191,7 @@ impl OneFService {
                 about: None,
             },
             applied_at: chrono::Utc::now().to_rfc3339(),
-            source: Some(SOURCE_TELEGRAM.into()),
+            source: Some(SOURCE_TELEGRAM),
         };
 
         let wrapper = OneFRequestWrapper {
@@ -456,7 +459,7 @@ impl OneFService {
 mod tests {
     use super::*;
 
-    fn payload(telegram_id: Option<i64>, source: &str) -> serde_json::Value {
+    fn payload(telegram_id: Option<i64>, source: i32) -> serde_json::Value {
         serde_json::to_value(OneFRequestWrapper {
             request_body: OneFApplicationPayload {
                 event_type: "new_application".into(),
@@ -478,7 +481,7 @@ mod tests {
                     about: None,
                 },
                 applied_at: "2026-11-04T07:08:10.000000000+00:00".into(),
-                source: Some(source.into()),
+                source: Some(source),
             },
         })
         .unwrap()
@@ -487,13 +490,13 @@ mod tests {
     #[test]
     fn every_application_says_where_it_came_from() {
         let bot = payload(Some(123456789), SOURCE_TELEGRAM);
-        assert_eq!(bot["requestBody"]["source"], "telegram");
+        assert_eq!(bot["requestBody"]["source"], 1);
         assert_eq!(bot["requestBody"]["candidate"]["telegram_id"], 123456789);
         // Unchanged for the bot: no site-only keys.
         assert!(bot["requestBody"]["candidate"].get("city").is_none());
 
-        let site = payload(None, "job.koinotinav.tj");
-        assert_eq!(site["requestBody"]["source"], "job.koinotinav.tj");
+        let site = payload(None, SOURCE_JOB_SITE);
+        assert_eq!(site["requestBody"]["source"], 2);
         // Sent as an explicit null, not dropped: 1F's script reads the key.
         assert!(site["requestBody"]["candidate"]["telegram_id"].is_null());
         assert!(site["requestBody"]["candidate"].as_object().unwrap().contains_key("telegram_id"));
