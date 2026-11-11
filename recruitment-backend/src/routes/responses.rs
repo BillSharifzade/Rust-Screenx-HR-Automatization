@@ -23,11 +23,28 @@ pub async fn grade_one(
         cv_text = crate::routes::candidate_routes::extract_text_from_file(path).await;
     }
     let is_scanned = !cv_text.is_empty() && cv_text.trim().len() < 100;
-    let cv_info = if is_scanned {
+    let mut cv_info = if is_scanned {
         format!("[NOTE: The candidate's CV appears to be a scanned image. Extracted text is very sparse: '{}'. Please evaluate based on this and basic profile info.]", cv_text.trim())
     } else {
         cv_text.clone()
     };
+    // Job site applicants may attach no file but describe themselves in the form.
+    // Only without a file: extra text would skip the vision pass on scanned CVs.
+    if candidate.cv_url.is_none() {
+        if let Some(about) = candidate
+            .profile_data
+            .as_ref()
+            .and_then(|p| p.get("about"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            cv_info = format!(
+                "[The candidate attached no CV file. Below is what they wrote about themselves in the job site application form.]\n{}",
+                about
+            );
+        }
+    }
 
     let vacancy = state
         .koinotinav_service
