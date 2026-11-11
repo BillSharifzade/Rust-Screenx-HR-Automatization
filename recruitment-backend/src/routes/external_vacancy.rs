@@ -75,13 +75,20 @@ pub async fn create_external_vacancy(
     };
 
     let (vacancy, created) = state.koinotinav_service.upsert_vacancy(&fields).await?;
+    let message = match (created, vacancy.status.as_str()) {
+        (false, _) => "Vacancy updated",
+        (true, "published") => "Vacancy published",
+        (true, "draft") => "Draft created",
+        (true, _) => "Vacancy created",
+    };
     tracing::info!(
-        "Job board vacancy {} {} for 1F {:?}",
+        "Job board vacancy {} ({}): {} for 1F {:?}",
         vacancy.id,
-        if created { "published" } else { "updated" },
+        vacancy.status,
+        message,
         vacancy.external_id
     );
-    Ok(reply(if created { "Vacancy published" } else { "Vacancy updated" }, &vacancy, Some(created)))
+    Ok(reply(message, &vacancy, Some(created)))
 }
 
 /// `POST /api/onef/vacancies/external/update`: change some fields of a vacancy
